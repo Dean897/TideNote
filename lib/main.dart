@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
-import 'package:intl/intl.dart'; // Digunakan untuk format tanggal yang rapi
+import 'dart:convert'; // Untuk menerjemahkan data ke format teks (JSON)
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // Alat Local Storage
 
 void main() {
   runApp(const TideNoteApp());
@@ -33,50 +35,92 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool _isFabOpen = false;
+  List<Map<String, dynamic>> _tasks = []; // Data awal dikosongkan
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTasks(); // Memanggil fungsi muat data saat aplikasi pertama dibuka
+  }
 
   // ==========================================
-  // STATE DINAMIS (DATABASE SEMENTARA)
+  // FUNGSI LOCAL STORAGE (SIMPAN & MUAT DATA)
   // ==========================================
-  // Di sinilah tugas-tugas akan disimpan
-  final List<Map<String, dynamic>> _tasks = [
-    {
-      'id': '1',
-      'title': 'Revisi Proposal Skripsi',
-      'instruction': 'Perbaiki bab 2 sesuai arahan dosen pembimbing.',
-      'deadline': DateTime.now().add(const Duration(hours: 12)),
-      'status': 'To-Do',
-      'isUrgent': true,
-      'folder': 'Semester 8 - Tugas Akhir',
-    },
-    {
-      'id': '2',
-      'title': 'Desain Wireframe TideNote',
-      'instruction': 'Gunakan bentuk squircle dan warna pastel blue.',
-      'deadline': DateTime.now().add(const Duration(days: 1)),
-      'status': 'In Progress',
-      'isUrgent': false,
-      'folder': 'Pekerjaan - UI/UX',
-    },
-    {
-      'id': '3',
-      'title': 'Belanja Bulanan',
-      'instruction': 'Beli sabun, sampo, dan bahan makanan.',
-      'deadline': DateTime.now().add(const Duration(days: 3)),
-      'status': 'To-Do',
-      'isUrgent': false,
-      'folder': 'Lainnya',
-    },
-  ];
+  Future<void> _loadTasks() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? savedTasks = prefs.getString('tidenote_data');
 
+    if (savedTasks != null) {
+      // Jika memori ada isinya, terjemahkan kembali ke dalam List
+      final List<dynamic> decodedData = json.decode(savedTasks);
+      setState(() {
+        _tasks = decodedData.map((item) {
+          return {
+            'id': item['id'],
+            'title': item['title'],
+            'instruction': item['instruction'],
+            'deadline': DateTime.parse(item['deadline']),
+            'status': item['status'],
+            'isUrgent': item['isUrgent'],
+            'folder': item['folder'],
+          };
+        }).toList();
+      });
+    } else {
+      // Jika memori kosong (baru pertama instal), tampilkan data bawaan
+      setState(() {
+        _tasks = [
+          {
+            'id': '1',
+            'title': 'Revisi Proposal Skripsi',
+            'instruction': 'Perbaiki bab 2 sesuai arahan dosen pembimbing.',
+            'deadline': DateTime.now().add(const Duration(hours: 12)),
+            'status': 'To-Do',
+            'isUrgent': true,
+            'folder': 'Semester 8 - Tugas Akhir',
+          },
+          {
+            'id': '2',
+            'title': 'Desain Wireframe TideNote',
+            'instruction': 'Gunakan bentuk squircle dan warna pastel blue.',
+            'deadline': DateTime.now().add(const Duration(days: 1)),
+            'status': 'In Progress',
+            'isUrgent': false,
+            'folder': 'Pekerjaan - UI/UX',
+          },
+        ];
+      });
+      _saveTasks(); // Simpan data bawaan ke memori
+    }
+  }
+
+  Future<void> _saveTasks() async {
+    final prefs = await SharedPreferences.getInstance();
+    // Ubah data DateTime menjadi teks sebelum disimpan ke memori
+    final List<Map<String, dynamic>> dataToSave = _tasks.map((task) {
+      return {
+        'id': task['id'],
+        'title': task['title'],
+        'instruction': task['instruction'],
+        'deadline': task['deadline'].toIso8601String(),
+        'status': task['status'],
+        'isUrgent': task['isUrgent'],
+        'folder': task['folder'],
+      };
+    }).toList();
+
+    await prefs.setString('tidenote_data', json.encode(dataToSave));
+  }
+
+  // ==========================================
+  // INTERAKSI UI
+  // ==========================================
   void _toggleFab() {
     setState(() {
       _isFabOpen = !_isFabOpen;
     });
   }
 
-  // ==========================================
-  // FUNGSI MEMUNCULKAN FORM TAMBAH TUGAS
-  // ==========================================
   void _showAddTaskModal() {
     final TextEditingController titleController = TextEditingController();
     final TextEditingController instructionController = TextEditingController();
@@ -88,7 +132,6 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: Colors.transparent,
       builder: (ctx) {
         return Container(
-          // Memastikan form tidak tertutup keyboard
           padding: EdgeInsets.only(
             bottom: MediaQuery.of(ctx).viewInsets.bottom,
             left: 24,
@@ -112,8 +155,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const SizedBox(height: 20),
-
-              // Input Judul
               TextField(
                 controller: titleController,
                 decoration: InputDecoration(
@@ -127,8 +168,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const SizedBox(height: 12),
-
-              // Input Instruksi
               TextField(
                 controller: instructionController,
                 maxLines: 3,
@@ -143,8 +182,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
               ),
               const SizedBox(height: 24),
-
-              // Tombol Simpan
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -156,24 +193,22 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   onPressed: () {
-                    // Validasi: Judul tidak boleh kosong
                     if (titleController.text.trim().isEmpty) return;
 
-                    // Memasukkan data baru ke dalam list _tasks
                     setState(() {
                       _tasks.add({
                         'id': DateTime.now().toString(),
                         'title': titleController.text,
                         'instruction': instructionController.text,
-                        'deadline': selectedDeadline, // Secara default besok
-                        'status':
-                            'To-Do', // Status otomatis To-Do sesuai rancanganmu
+                        'deadline': selectedDeadline,
+                        'status': 'To-Do',
                         'isUrgent': false,
                         'folder': 'Lainnya',
                       });
                     });
 
-                    Navigator.pop(ctx); // Menutup Modal Form
+                    _saveTasks(); // <-- SIMPAN KE MEMORI SETELAH DITAMBAH
+                    Navigator.pop(ctx);
                   },
                   child: const Text(
                     'Simpan Tugas',
@@ -193,16 +228,12 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // ==========================================
-  // PEMBANTU: FILTER DATA BERDASARKAN FOLDER
-  // ==========================================
   List<Map<String, dynamic>> _getTasksByFolder(String folderName) {
     return _tasks.where((task) => task['folder'] == folderName).toList();
   }
 
   @override
   Widget build(BuildContext context) {
-    // Memecah tugas berdasarkan foldernya
     final folderSkripsi = _getTasksByFolder('Semester 8 - Tugas Akhir');
     final folderPekerjaan = _getTasksByFolder('Pekerjaan - UI/UX');
     final folderLainnya = _getTasksByFolder('Lainnya');
@@ -216,7 +247,6 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // --- HEADER ---
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -258,8 +288,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 28),
-
-                  // --- SEARCH BAR ---
                   Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
@@ -281,13 +309,10 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-
-                  // --- DAFTAR FOLDER & TUGAS (DI-RENDER DINAMIS) ---
                   Expanded(
                     child: ListView(
                       physics: const BouncingScrollPhysics(),
                       children: [
-                        // Folder 1
                         if (folderSkripsi.isNotEmpty)
                           FolderAccordion(
                             folderName: 'Semester 8 - Tugas Akhir',
@@ -296,8 +321,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                 .map((t) => TaskCard.fromMap(t))
                                 .toList(),
                           ),
-
-                        // Folder 2
                         if (folderPekerjaan.isNotEmpty)
                           FolderAccordion(
                             folderName: 'Pekerjaan - UI/UX',
@@ -306,8 +329,6 @@ class _HomeScreenState extends State<HomeScreen> {
                                 .map((t) => TaskCard.fromMap(t))
                                 .toList(),
                           ),
-
-                        // Kategori Lainnya
                         if (folderLainnya.isNotEmpty) ...[
                           Padding(
                             padding: const EdgeInsets.only(
@@ -333,8 +354,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-
-          // --- LAPISAN BLUR & FAB ---
           if (_isFabOpen)
             GestureDetector(
               onTap: _toggleFab,
@@ -343,7 +362,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Container(color: Colors.white.withOpacity(0.4)),
               ),
             ),
-
           Positioned(
             bottom: 32,
             right: 24,
@@ -367,7 +385,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     isPrimary: true,
                     onTap: () {
                       _toggleFab();
-                      _showAddTaskModal(); // <-- Memanggil form tugas saat diklik
+                      _showAddTaskModal();
                     },
                   ),
                 const SizedBox(height: 16),
@@ -441,9 +459,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ==========================================
-// KOMPONEN: FOLDER ACCORDION
-// ==========================================
 class FolderAccordion extends StatelessWidget {
   final String folderName;
   final int taskCount;
@@ -468,7 +483,7 @@ class FolderAccordion extends StatelessWidget {
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
-          initiallyExpanded: true, // Folder terbuka secara default
+          initiallyExpanded: true,
           tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
           leading: Container(
             padding: const EdgeInsets.all(8),
@@ -517,9 +532,6 @@ class FolderAccordion extends StatelessWidget {
   }
 }
 
-// ==========================================
-// KOMPONEN: TASK CARD
-// ==========================================
 class TaskCard extends StatelessWidget {
   final String title;
   final String? instruction;
@@ -536,7 +548,6 @@ class TaskCard extends StatelessWidget {
     required this.isUrgent,
   });
 
-  // Fungsi pintar untuk mengubah Map (Data Base) menjadi Widget secara otomatis
   factory TaskCard.fromMap(Map<String, dynamic> data) {
     return TaskCard(
       title: data['title'],
@@ -550,19 +561,16 @@ class TaskCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     bool isDone = status == 'Done';
-
-    // Logika warna cerdas berdasarkan waktu deadline
     final now = DateTime.now();
     final difference = deadline.difference(now).inDays;
-    Color deadlineColor = const Color(0xFF86EFAC); // Hijau default (> 2 Hari)
+    Color deadlineColor = const Color(0xFF86EFAC);
 
     if (difference <= 1) {
-      deadlineColor = const Color(0xFFFCA5A5); // Merah (< 1 Hari)
+      deadlineColor = const Color(0xFFFCA5A5);
     } else if (difference <= 2) {
-      deadlineColor = const Color(0xFFFDE047); // Kuning (1-2 Hari)
+      deadlineColor = const Color(0xFFFDE047);
     }
 
-    // Format tanggal menjadi teks yang mudah dibaca
     String deadlineText = DateFormat('dd MMM, HH:mm').format(deadline);
 
     return Container(
