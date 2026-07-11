@@ -2,9 +2,15 @@ import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'dart:convert';
 import 'package:intl/intl.dart';
+import 'package:intl/date_symbol_data_local.dart'; 
 import 'package:shared_preferences/shared_preferences.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized(); 
+  await initializeDateFormatting(
+    'id_ID',
+    null,
+  ); // 
   runApp(const TideNoteApp());
 }
 
@@ -36,6 +42,10 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _isFabOpen = false;
   List<Map<String, dynamic>> _tasks = [];
+
+  // Variabel State Baru untuk Pencarian dan Tab
+  String _searchQuery = '';
+  int _selectedTabIndex = 0; 
 
   @override
   void initState() {
@@ -109,7 +119,6 @@ class _HomeScreenState extends State<HomeScreen> {
     await prefs.setString('tidenote_data', json.encode(dataToSave));
   }
 
-  // Fungsi untuk Menghapus Tugas
   void _deleteTask(String id) {
     setState(() {
       _tasks.removeWhere((task) => task['id'] == id);
@@ -117,7 +126,6 @@ class _HomeScreenState extends State<HomeScreen> {
     _saveTasks();
   }
 
-  // Fungsi untuk Mengubah Status Tugas (To-Do -> In Progress -> Done -> To-Do)
   void _toggleTaskStatus(String id) {
     setState(() {
       final taskIndex = _tasks.indexWhere((task) => task['id'] == id);
@@ -251,15 +259,42 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  List<Map<String, dynamic>> _getTasksByFolder(String folderName) {
-    return _tasks.where((task) => task['folder'] == folderName).toList();
+  // LOGIKA PINTAR: Filter berdasarkan Folder, Pencarian, dan Tab Aktif/Arsip
+  List<Map<String, dynamic>> _getFilteredTasks(String folderName) {
+    return _tasks.where((task) {
+      // 1. Cek kecocokan folder
+      bool matchesFolder = task['folder'] == folderName;
+
+      // 2. Cek kecocokan kata kunci pencarian (Case insensitive)
+      bool matchesSearch =
+          task['title'].toString().toLowerCase().contains(
+            _searchQuery.toLowerCase(),
+          ) ||
+          (task['instruction'] != null &&
+              task['instruction'].toString().toLowerCase().contains(
+                _searchQuery.toLowerCase(),
+              ));
+
+      // 3. Cek kecocokan tab (0 = Bukan Done, 1 = Done)
+      bool matchesTab = _selectedTabIndex == 0
+          ? task['status'] != 'Done'
+          : task['status'] == 'Done';
+
+      return matchesFolder && matchesSearch && matchesTab;
+    }).toList();
   }
 
   @override
   Widget build(BuildContext context) {
-    final folderSkripsi = _getTasksByFolder('Semester 8 - Tugas Akhir');
-    final folderPekerjaan = _getTasksByFolder('Pekerjaan - UI/UX');
-    final folderLainnya = _getTasksByFolder('Lainnya');
+    final folderSkripsi = _getFilteredTasks('Semester 8 - Tugas Akhir');
+    final folderPekerjaan = _getFilteredTasks('Pekerjaan - UI/UX');
+    final folderLainnya = _getFilteredTasks('Lainnya');
+
+    // Mengecek apakah layar benar-benar kosong
+    final bool isListEmpty =
+        folderSkripsi.isEmpty &&
+        folderPekerjaan.isEmpty &&
+        folderLainnya.isEmpty;
 
     return Scaffold(
       body: Stack(
@@ -287,7 +322,9 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Hari ini',
+                            DateFormat('EEEE, dd MMM yyyy', 'id_ID').format(
+                              DateTime.now(),
+                            ), // Tanggal Hari Ini Asli (Opsional jika intl terpasang dengan locale)
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w500,
@@ -311,12 +348,19 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 28),
+
+                  // KOLOM PENCARIAN DINAMIS
                   Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: TextField(
+                      onChanged: (value) {
+                        setState(() {
+                          _searchQuery = value;
+                        });
+                      },
                       decoration: InputDecoration(
                         hintText: 'Cari tugas atau instruksi...',
                         prefixIcon: Icon(
@@ -332,67 +376,140 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
-                  Expanded(
-                    child: ListView(
-                      physics: const BouncingScrollPhysics(),
-                      children: [
-                        if (folderSkripsi.isNotEmpty)
-                          FolderAccordion(
-                            folderName: 'Semester 8 - Tugas Akhir',
-                            taskCount: folderSkripsi.length,
-                            // Meneruskan fungsi hapus & ubah status ke komponen
-                            tasks: folderSkripsi
-                                .map(
-                                  (t) => TaskCard.fromMap(
-                                    t,
-                                    onDelete: () => _deleteTask(t['id']),
-                                    onToggleStatus: () =>
-                                        _toggleTaskStatus(t['id']),
-                                  ),
-                                )
-                                .toList(),
-                          ),
-                        if (folderPekerjaan.isNotEmpty)
-                          FolderAccordion(
-                            folderName: 'Pekerjaan - UI/UX',
-                            taskCount: folderPekerjaan.length,
-                            tasks: folderPekerjaan
-                                .map(
-                                  (t) => TaskCard.fromMap(
-                                    t,
-                                    onDelete: () => _deleteTask(t['id']),
-                                    onToggleStatus: () =>
-                                        _toggleTaskStatus(t['id']),
-                                  ),
-                                )
-                                .toList(),
-                          ),
-                        if (folderLainnya.isNotEmpty) ...[
-                          Padding(
-                            padding: const EdgeInsets.only(
-                              left: 8,
-                              bottom: 12,
-                              top: 8,
-                            ),
-                            child: Text(
-                              'TUGAS LAINNYA',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.grey.shade400,
+
+                  // MENU TAB INTERAKTIF
+                  Row(
+                    children: [
+                      GestureDetector(
+                        onTap: () => setState(() => _selectedTabIndex = 0),
+                        child: Container(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          decoration: BoxDecoration(
+                            border: Border(
+                              bottom: BorderSide(
+                                color: _selectedTabIndex == 0
+                                    ? const Color(0xFF8DBEE1)
+                                    : Colors.transparent,
+                                width: 2,
                               ),
                             ),
                           ),
-                          ...folderLainnya.map(
-                            (t) => TaskCard.fromMap(
-                              t,
-                              onDelete: () => _deleteTask(t['id']),
-                              onToggleStatus: () => _toggleTaskStatus(t['id']),
+                          child: Text(
+                            'Tugas Aktif',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: _selectedTabIndex == 0
+                                  ? const Color(0xFF8DBEE1)
+                                  : Colors.grey.shade400,
                             ),
                           ),
-                        ],
-                      ],
-                    ),
+                        ),
+                      ),
+                      const SizedBox(width: 24),
+                      GestureDetector(
+                        onTap: () => setState(() => _selectedTabIndex = 1),
+                        child: Container(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          decoration: BoxDecoration(
+                            border: Border(
+                              bottom: BorderSide(
+                                color: _selectedTabIndex == 1
+                                    ? const Color(0xFF8DBEE1)
+                                    : Colors.transparent,
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                          child: Text(
+                            'Arsip Selesai',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: _selectedTabIndex == 1
+                                  ? const Color(0xFF8DBEE1)
+                                  : Colors.grey.shade400,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+
+                  // DAFTAR TUGAS
+                  Expanded(
+                    child: isListEmpty
+                        ? Center(
+                            child: Text(
+                              _searchQuery.isNotEmpty
+                                  ? 'Tidak ada tugas yang cocok dengan pencarian.'
+                                  : _selectedTabIndex == 1
+                                  ? 'Belum ada tugas yang selesai.'
+                                  : 'Semua tugas sudah beres!',
+                              style: TextStyle(color: Colors.grey.shade500),
+                            ),
+                          )
+                        : ListView(
+                            physics: const BouncingScrollPhysics(),
+                            children: [
+                              if (folderSkripsi.isNotEmpty)
+                                FolderAccordion(
+                                  folderName: 'Semester 8 - Tugas Akhir',
+                                  taskCount: folderSkripsi.length,
+                                  tasks: folderSkripsi
+                                      .map(
+                                        (t) => TaskCard.fromMap(
+                                          t,
+                                          onDelete: () => _deleteTask(t['id']),
+                                          onToggleStatus: () =>
+                                              _toggleTaskStatus(t['id']),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              if (folderPekerjaan.isNotEmpty)
+                                FolderAccordion(
+                                  folderName: 'Pekerjaan - UI/UX',
+                                  taskCount: folderPekerjaan.length,
+                                  tasks: folderPekerjaan
+                                      .map(
+                                        (t) => TaskCard.fromMap(
+                                          t,
+                                          onDelete: () => _deleteTask(t['id']),
+                                          onToggleStatus: () =>
+                                              _toggleTaskStatus(t['id']),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              if (folderLainnya.isNotEmpty) ...[
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    left: 8,
+                                    bottom: 12,
+                                    top: 8,
+                                  ),
+                                  child: Text(
+                                    'TUGAS LAINNYA',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.grey.shade400,
+                                    ),
+                                  ),
+                                ),
+                                ...folderLainnya.map(
+                                  (t) => TaskCard.fromMap(
+                                    t,
+                                    onDelete: () => _deleteTask(t['id']),
+                                    onToggleStatus: () =>
+                                        _toggleTaskStatus(t['id']),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
                   ),
                 ],
               ),
@@ -630,11 +747,9 @@ class TaskCard extends StatelessWidget {
 
     String deadlineText = DateFormat('dd MMM, HH:mm').format(deadline);
 
-    // Membungkus kartu dengan Dismissible untuk efek geser-hapus
     return Dismissible(
       key: Key(id),
-      direction:
-          DismissDirection.endToStart, // Hanya bisa digeser dari kanan ke kiri
+      direction: DismissDirection.endToStart,
       onDismissed: (direction) => onDelete(),
       background: Container(
         margin: const EdgeInsets.only(bottom: 16),
@@ -713,7 +828,6 @@ class TaskCard extends StatelessWidget {
                         ),
                       ],
                     ),
-                    // Membungkus tombol status dengan GestureDetector agar bisa diklik
                     GestureDetector(
                       onTap: onToggleStatus,
                       child: Container(
