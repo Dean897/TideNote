@@ -53,6 +53,7 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // --- HEADER ---
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -104,6 +105,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 28),
+
+                  // --- SEARCH BAR ---
                   Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
@@ -137,6 +140,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const SizedBox(height: 28),
+
+                  // --- MENU TABS ---
                   Row(
                     children: [
                       Container(
@@ -170,29 +175,63 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 24),
+
+                  // --- DAFTAR FOLDER & TUGAS ---
                   Expanded(
                     child: ListView(
                       physics: const BouncingScrollPhysics(),
-                      children: const [
-                        TaskCard(
-                          title: 'Revisi Proposal Skripsi',
-                          instruction:
-                              'Perbaiki bab 2 sesuai arahan dosen pembimbing.',
-                          deadlineText: 'Hari ini, 23:59',
-                          status: 'To-Do',
-                          isUrgent: true,
-                          deadlineColor: Color(0xFFFCA5A5),
+                      children: [
+                        // Folder 1
+                        const FolderAccordion(
+                          folderName: 'Semester 8 - Tugas Akhir',
+                          taskCount: 1,
+                          tasks: [
+                            TaskCard(
+                              title: 'Revisi Proposal Skripsi',
+                              instruction:
+                                  'Perbaiki bab 2 sesuai arahan dosen pembimbing.',
+                              deadlineText: 'Hari ini, 23:59',
+                              status: 'To-Do',
+                              isUrgent: true,
+                              deadlineColor: Color(0xFFFCA5A5),
+                            ),
+                          ],
                         ),
-                        TaskCard(
-                          title: 'Desain Wireframe TideNote',
-                          instruction:
-                              'Gunakan bentuk squircle dan warna pastel blue.',
-                          deadlineText: 'Besok, 12:00',
-                          status: 'In Progress',
-                          isUrgent: false,
-                          deadlineColor: Color(0xFFFDE047),
+
+                        // Folder 2
+                        const FolderAccordion(
+                          folderName: 'Pekerjaan - UI/UX',
+                          taskCount: 1,
+                          tasks: [
+                            TaskCard(
+                              title: 'Desain Wireframe TideNote',
+                              instruction:
+                                  'Gunakan bentuk squircle dan warna pastel blue.',
+                              deadlineText: 'Besok, 12:00',
+                              status: 'In Progress',
+                              isUrgent: false,
+                              deadlineColor: Color(0xFFFDE047),
+                            ),
+                          ],
                         ),
-                        TaskCard(
+
+                        // Kategori Tugas Tanpa Folder
+                        Padding(
+                          padding: const EdgeInsets.only(
+                            left: 8,
+                            bottom: 12,
+                            top: 8,
+                          ),
+                          child: Text(
+                            'TUGAS LAINNYA',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey.shade400,
+                            ),
+                          ),
+                        ),
+                        const TaskCard(
                           title: 'Belanja Bulanan',
                           instruction: 'Beli sabun, sampo, dan bahan makanan.',
                           deadlineText: '14 Jul, 09:00',
@@ -209,7 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
 
           // ==========================================
-          // LAPISAN 2: BACKDROP BLUR KACA TRANSPARAN
+          // LAPISAN 2: BACKDROP BLUR
           // ==========================================
           if (_isFabOpen)
             GestureDetector(
@@ -227,7 +266,7 @@ class _HomeScreenState extends State<HomeScreen> {
             bottom: 32,
             right: 24,
             child: Column(
-              mainAxisSize: MainAxisSize.min, // <-- INI ADALAH KODE SOLUSINYA
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 if (_isFabOpen)
@@ -328,6 +367,89 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ==========================================
+// KOMPONEN: FOLDER ACCORDION
+// ==========================================
+class FolderAccordion extends StatelessWidget {
+  final String folderName;
+  final int taskCount;
+  final List<Widget> tasks;
+
+  const FolderAccordion({
+    super.key,
+    required this.folderName,
+    required this.taskCount,
+    required this.tasks,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.grey.shade100, width: 1.5),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.02),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Theme(
+        // Trik untuk menghilangkan garis pembatas (divider) bawaan Flutter
+        data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          tilePadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFFBFF4FF).withOpacity(0.5),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.folder_open_rounded,
+              color: Color(0xFF8DBEE1),
+              size: 16,
+            ),
+          ),
+          title: Text(
+            folderName,
+            style: const TextStyle(
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+              color: Color(0xFF334155),
+            ),
+          ),
+          trailing: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              '$taskCount',
+              style: const TextStyle(
+                fontSize: 10,
+                fontWeight: FontWeight.bold,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          childrenPadding: const EdgeInsets.only(
+            left: 16,
+            right: 16,
+            bottom: 8,
+          ),
+          children: tasks,
+        ),
       ),
     );
   }
