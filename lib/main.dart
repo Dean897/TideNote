@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
-import 'dart:convert'; // Untuk menerjemahkan data ke format teks (JSON)
+import 'dart:convert';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // Alat Local Storage
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   runApp(const TideNoteApp());
@@ -35,23 +35,22 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool _isFabOpen = false;
-  List<Map<String, dynamic>> _tasks = []; // Data awal dikosongkan
+  List<Map<String, dynamic>> _tasks = [];
 
   @override
   void initState() {
     super.initState();
-    _loadTasks(); // Memanggil fungsi muat data saat aplikasi pertama dibuka
+    _loadTasks();
   }
 
   // ==========================================
-  // FUNGSI LOCAL STORAGE (SIMPAN & MUAT DATA)
+  // FUNGSI LOCAL STORAGE & MANAJEMEN DATA
   // ==========================================
   Future<void> _loadTasks() async {
     final prefs = await SharedPreferences.getInstance();
     final String? savedTasks = prefs.getString('tidenote_data');
 
     if (savedTasks != null) {
-      // Jika memori ada isinya, terjemahkan kembali ke dalam List
       final List<dynamic> decodedData = json.decode(savedTasks);
       setState(() {
         _tasks = decodedData.map((item) {
@@ -67,7 +66,6 @@ class _HomeScreenState extends State<HomeScreen> {
         }).toList();
       });
     } else {
-      // Jika memori kosong (baru pertama instal), tampilkan data bawaan
       setState(() {
         _tasks = [
           {
@@ -90,13 +88,12 @@ class _HomeScreenState extends State<HomeScreen> {
           },
         ];
       });
-      _saveTasks(); // Simpan data bawaan ke memori
+      _saveTasks();
     }
   }
 
   Future<void> _saveTasks() async {
     final prefs = await SharedPreferences.getInstance();
-    // Ubah data DateTime menjadi teks sebelum disimpan ke memori
     final List<Map<String, dynamic>> dataToSave = _tasks.map((task) {
       return {
         'id': task['id'],
@@ -110,6 +107,32 @@ class _HomeScreenState extends State<HomeScreen> {
     }).toList();
 
     await prefs.setString('tidenote_data', json.encode(dataToSave));
+  }
+
+  // Fungsi untuk Menghapus Tugas
+  void _deleteTask(String id) {
+    setState(() {
+      _tasks.removeWhere((task) => task['id'] == id);
+    });
+    _saveTasks();
+  }
+
+  // Fungsi untuk Mengubah Status Tugas (To-Do -> In Progress -> Done -> To-Do)
+  void _toggleTaskStatus(String id) {
+    setState(() {
+      final taskIndex = _tasks.indexWhere((task) => task['id'] == id);
+      if (taskIndex != -1) {
+        final currentStatus = _tasks[taskIndex]['status'];
+        if (currentStatus == 'To-Do') {
+          _tasks[taskIndex]['status'] = 'In Progress';
+        } else if (currentStatus == 'In Progress') {
+          _tasks[taskIndex]['status'] = 'Done';
+        } else {
+          _tasks[taskIndex]['status'] = 'To-Do';
+        }
+      }
+    });
+    _saveTasks();
   }
 
   // ==========================================
@@ -207,7 +230,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       });
                     });
 
-                    _saveTasks(); // <-- SIMPAN KE MEMORI SETELAH DITAMBAH
+                    _saveTasks();
                     Navigator.pop(ctx);
                   },
                   child: const Text(
@@ -317,8 +340,16 @@ class _HomeScreenState extends State<HomeScreen> {
                           FolderAccordion(
                             folderName: 'Semester 8 - Tugas Akhir',
                             taskCount: folderSkripsi.length,
+                            // Meneruskan fungsi hapus & ubah status ke komponen
                             tasks: folderSkripsi
-                                .map((t) => TaskCard.fromMap(t))
+                                .map(
+                                  (t) => TaskCard.fromMap(
+                                    t,
+                                    onDelete: () => _deleteTask(t['id']),
+                                    onToggleStatus: () =>
+                                        _toggleTaskStatus(t['id']),
+                                  ),
+                                )
                                 .toList(),
                           ),
                         if (folderPekerjaan.isNotEmpty)
@@ -326,7 +357,14 @@ class _HomeScreenState extends State<HomeScreen> {
                             folderName: 'Pekerjaan - UI/UX',
                             taskCount: folderPekerjaan.length,
                             tasks: folderPekerjaan
-                                .map((t) => TaskCard.fromMap(t))
+                                .map(
+                                  (t) => TaskCard.fromMap(
+                                    t,
+                                    onDelete: () => _deleteTask(t['id']),
+                                    onToggleStatus: () =>
+                                        _toggleTaskStatus(t['id']),
+                                  ),
+                                )
                                 .toList(),
                           ),
                         if (folderLainnya.isNotEmpty) ...[
@@ -345,7 +383,13 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ),
                           ),
-                          ...folderLainnya.map((t) => TaskCard.fromMap(t)),
+                          ...folderLainnya.map(
+                            (t) => TaskCard.fromMap(
+                              t,
+                              onDelete: () => _deleteTask(t['id']),
+                              onToggleStatus: () => _toggleTaskStatus(t['id']),
+                            ),
+                          ),
                         ],
                       ],
                     ),
@@ -533,28 +577,41 @@ class FolderAccordion extends StatelessWidget {
 }
 
 class TaskCard extends StatelessWidget {
+  final String id;
   final String title;
   final String? instruction;
   final DateTime deadline;
   final String status;
   final bool isUrgent;
+  final VoidCallback onDelete;
+  final VoidCallback onToggleStatus;
 
   const TaskCard({
     super.key,
+    required this.id,
     required this.title,
     this.instruction,
     required this.deadline,
     required this.status,
     required this.isUrgent,
+    required this.onDelete,
+    required this.onToggleStatus,
   });
 
-  factory TaskCard.fromMap(Map<String, dynamic> data) {
+  factory TaskCard.fromMap(
+    Map<String, dynamic> data, {
+    required VoidCallback onDelete,
+    required VoidCallback onToggleStatus,
+  }) {
     return TaskCard(
+      id: data['id'],
       title: data['title'],
       instruction: data['instruction'],
       deadline: data['deadline'],
       status: data['status'],
       isUrgent: data['isUrgent'],
+      onDelete: onDelete,
+      onToggleStatus: onToggleStatus,
     );
   }
 
@@ -573,106 +630,135 @@ class TaskCard extends StatelessWidget {
 
     String deadlineText = DateFormat('dd MMM, HH:mm').format(deadline);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: isDone ? Colors.grey.shade50 : Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDone ? Colors.transparent : deadlineColor,
-          width: 2,
+    // Membungkus kartu dengan Dismissible untuk efek geser-hapus
+    return Dismissible(
+      key: Key(id),
+      direction:
+          DismissDirection.endToStart, // Hanya bisa digeser dari kanan ke kiri
+      onDismissed: (direction) => onDelete(),
+      background: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        decoration: BoxDecoration(
+          color: Colors.red.shade400,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.only(right: 24),
+        child: const Icon(
+          Icons.delete_outline_rounded,
+          color: Colors.white,
+          size: 28,
         ),
       ),
-      child: Stack(
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.only(right: 32),
-                child: Text(
-                  title,
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    decoration: isDone ? TextDecoration.lineThrough : null,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: isDone ? Colors.grey.shade50 : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isDone ? Colors.transparent : deadlineColor,
+            width: 2,
+          ),
+        ),
+        child: Stack(
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(right: 32),
+                  child: Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      decoration: isDone ? TextDecoration.lineThrough : null,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              if (instruction != null && instruction!.isNotEmpty)
-                Text(
-                  instruction!,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                const SizedBox(height: 8),
+                if (instruction != null && instruction!.isNotEmpty)
+                  Text(
+                    instruction!,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                  ),
+                const SizedBox(height: 16),
+                const Divider(
+                  color: Color(0xFFF1F5F9),
+                  height: 1,
+                  thickness: 1,
                 ),
-              const SizedBox(height: 16),
-              const Divider(color: Color(0xFFF1F5F9), height: 1, thickness: 1),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.calendar_today_rounded,
-                        size: 14,
-                        color: Colors.grey.shade400,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        deadlineText,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey.shade500,
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.calendar_today_rounded,
+                          size: 14,
+                          color: Colors.grey.shade400,
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          deadlineText,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.grey.shade500,
+                          ),
+                        ),
+                      ],
+                    ),
+                    // Membungkus tombol status dengan GestureDetector agar bisa diklik
+                    GestureDetector(
+                      onTap: onToggleStatus,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isDone
+                              ? Colors.green.shade50
+                              : status == 'In Progress'
+                              ? const Color(0xFFBFF4FF)
+                              : Colors.grey.shade100,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          status,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: isDone
+                                ? Colors.green.shade600
+                                : status == 'In Progress'
+                                ? const Color(0xFF5AB2D3)
+                                : Colors.grey.shade600,
+                          ),
                         ),
                       ),
-                    ],
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
                     ),
-                    decoration: BoxDecoration(
-                      color: isDone
-                          ? Colors.green.shade50
-                          : status == 'In Progress'
-                          ? const Color(0xFFBFF4FF)
-                          : Colors.grey.shade100,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      status,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: isDone
-                            ? Colors.green.shade600
-                            : status == 'In Progress'
-                            ? const Color(0xFF5AB2D3)
-                            : Colors.grey.shade600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          if (isUrgent && !isDone)
-            Positioned(
-              top: 0,
-              right: 0,
-              child: Icon(
-                Icons.local_fire_department_rounded,
-                color: Colors.orange.shade400,
-                size: 22,
-              ),
+                  ],
+                ),
+              ],
             ),
-        ],
+            if (isUrgent && !isDone)
+              Positioned(
+                top: 0,
+                right: 0,
+                child: Icon(
+                  Icons.local_fire_department_rounded,
+                  color: Colors.orange.shade400,
+                  size: 22,
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
