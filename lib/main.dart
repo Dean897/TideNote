@@ -2,15 +2,12 @@ import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'dart:convert';
 import 'package:intl/intl.dart';
-import 'package:intl/date_symbol_data_local.dart'; 
+import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized(); 
-  await initializeDateFormatting(
-    'id_ID',
-    null,
-  ); // 
+  WidgetsFlutterBinding.ensureInitialized();
+  await initializeDateFormatting('id_ID', null);
   runApp(const TideNoteApp());
 }
 
@@ -42,24 +39,38 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   bool _isFabOpen = false;
   List<Map<String, dynamic>> _tasks = [];
+  List<String> _folders = []; // Data Folder Dinamis
 
-  // Variabel State Baru untuk Pencarian dan Tab
   String _searchQuery = '';
-  int _selectedTabIndex = 0; 
+  int _selectedTabIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadTasks();
+    _loadData(); // Memuat tugas dan folder
   }
 
   // ==========================================
-  // FUNGSI LOCAL STORAGE & MANAJEMEN DATA
+  // FUNGSI LOCAL STORAGE (TUGAS & FOLDER)
   // ==========================================
-  Future<void> _loadTasks() async {
+  Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
     final String? savedTasks = prefs.getString('tidenote_data');
+    final String? savedFolders = prefs.getString('tidenote_folders');
 
+    // Muat Folder
+    if (savedFolders != null) {
+      setState(() {
+        _folders = List<String>.from(json.decode(savedFolders));
+      });
+    } else {
+      setState(() {
+        _folders = ['Semester 8 - Tugas Akhir', 'Pekerjaan - UI/UX', 'Lainnya'];
+      });
+      _saveFolders();
+    }
+
+    // Muat Tugas
     if (savedTasks != null) {
       final List<dynamic> decodedData = json.decode(savedTasks);
       setState(() {
@@ -115,8 +126,12 @@ class _HomeScreenState extends State<HomeScreen> {
         'folder': task['folder'],
       };
     }).toList();
-
     await prefs.setString('tidenote_data', json.encode(dataToSave));
+  }
+
+  Future<void> _saveFolders() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('tidenote_folders', json.encode(_folders));
   }
 
   void _deleteTask(String id) {
@@ -144,18 +159,10 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   // ==========================================
-  // INTERAKSI UI
+  // MODAL TAMBAH FOLDER
   // ==========================================
-  void _toggleFab() {
-    setState(() {
-      _isFabOpen = !_isFabOpen;
-    });
-  }
-
-  void _showAddTaskModal() {
-    final TextEditingController titleController = TextEditingController();
-    final TextEditingController instructionController = TextEditingController();
-    DateTime selectedDeadline = DateTime.now().add(const Duration(days: 1));
+  void _showAddFolderModal() {
+    final TextEditingController folderController = TextEditingController();
 
     showModalBottomSheet(
       context: context,
@@ -178,7 +185,7 @@ class _HomeScreenState extends State<HomeScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Tambah Tugas Baru',
+                'Tambah Folder Baru',
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -187,23 +194,9 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 20),
               TextField(
-                controller: titleController,
+                controller: folderController,
                 decoration: InputDecoration(
-                  labelText: 'Judul Tugas',
-                  filled: true,
-                  fillColor: Colors.white,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide.none,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: instructionController,
-                maxLines: 3,
-                decoration: InputDecoration(
-                  labelText: 'Instruksi / Catatan',
+                  labelText: 'Nama Folder',
                   filled: true,
                   fillColor: Colors.white,
                   border: OutlineInputBorder(
@@ -224,25 +217,20 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   onPressed: () {
-                    if (titleController.text.trim().isEmpty) return;
+                    final folderName = folderController.text.trim();
+                    if (folderName.isEmpty) return;
 
                     setState(() {
-                      _tasks.add({
-                        'id': DateTime.now().toString(),
-                        'title': titleController.text,
-                        'instruction': instructionController.text,
-                        'deadline': selectedDeadline,
-                        'status': 'To-Do',
-                        'isUrgent': false,
-                        'folder': 'Lainnya',
-                      });
+                      if (!_folders.contains(folderName)) {
+                        _folders.add(folderName);
+                      }
                     });
 
-                    _saveTasks();
+                    _saveFolders();
                     Navigator.pop(ctx);
                   },
                   child: const Text(
-                    'Simpan Tugas',
+                    'Simpan Folder',
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 16,
@@ -259,13 +247,162 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // LOGIKA PINTAR: Filter berdasarkan Folder, Pencarian, dan Tab Aktif/Arsip
+  // ==========================================
+  // MODAL TAMBAH TUGAS (Dengan Pilihan Folder)
+  // ==========================================
+  void _showAddTaskModal() {
+    final TextEditingController titleController = TextEditingController();
+    final TextEditingController instructionController = TextEditingController();
+    DateTime selectedDeadline = DateTime.now().add(const Duration(days: 1));
+    String selectedFolder = _folders.isNotEmpty ? _folders.first : 'Lainnya';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        // StatefulBuilder digunakan agar Dropdown bisa merubah datanya sendiri di dalam modal
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return Container(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom,
+                left: 24,
+                right: 24,
+                top: 24,
+              ),
+              decoration: const BoxDecoration(
+                color: Color(0xFFF6F7F0),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Tambah Tugas Baru',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blueGrey,
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+                  TextField(
+                    controller: titleController,
+                    decoration: InputDecoration(
+                      labelText: 'Judul Tugas',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: instructionController,
+                    maxLines: 2,
+                    decoration: InputDecoration(
+                      labelText: 'Instruksi / Catatan',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  // Dropdown Pilih Folder
+                  DropdownButtonFormField<String>(
+                    value: selectedFolder,
+                    decoration: InputDecoration(
+                      labelText: 'Pilih Folder',
+                      filled: true,
+                      fillColor: Colors.white,
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(16),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                    items: _folders.map((String folder) {
+                      return DropdownMenuItem<String>(
+                        value: folder,
+                        child: Text(
+                          folder,
+                          style: const TextStyle(fontSize: 14),
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (String? newValue) {
+                      if (newValue != null) {
+                        setModalState(() {
+                          selectedFolder = newValue;
+                        });
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF8DBEE1),
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      onPressed: () {
+                        if (titleController.text.trim().isEmpty) return;
+
+                        setState(() {
+                          _tasks.add({
+                            'id': DateTime.now().toString(),
+                            'title': titleController.text,
+                            'instruction': instructionController.text,
+                            'deadline': selectedDeadline,
+                            'status': 'To-Do',
+                            'isUrgent': false,
+                            'folder':
+                                selectedFolder, // Menyimpan ke folder pilihan
+                          });
+                        });
+
+                        _saveTasks();
+                        Navigator.pop(ctx);
+                      },
+                      child: const Text(
+                        'Simpan Tugas',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _toggleFab() {
+    setState(() {
+      _isFabOpen = !_isFabOpen;
+    });
+  }
+
   List<Map<String, dynamic>> _getFilteredTasks(String folderName) {
     return _tasks.where((task) {
-      // 1. Cek kecocokan folder
       bool matchesFolder = task['folder'] == folderName;
-
-      // 2. Cek kecocokan kata kunci pencarian (Case insensitive)
       bool matchesSearch =
           task['title'].toString().toLowerCase().contains(
             _searchQuery.toLowerCase(),
@@ -274,27 +411,23 @@ class _HomeScreenState extends State<HomeScreen> {
               task['instruction'].toString().toLowerCase().contains(
                 _searchQuery.toLowerCase(),
               ));
-
-      // 3. Cek kecocokan tab (0 = Bukan Done, 1 = Done)
       bool matchesTab = _selectedTabIndex == 0
           ? task['status'] != 'Done'
           : task['status'] == 'Done';
-
       return matchesFolder && matchesSearch && matchesTab;
     }).toList();
   }
 
   @override
   Widget build(BuildContext context) {
-    final folderSkripsi = _getFilteredTasks('Semester 8 - Tugas Akhir');
-    final folderPekerjaan = _getFilteredTasks('Pekerjaan - UI/UX');
-    final folderLainnya = _getFilteredTasks('Lainnya');
-
-    // Mengecek apakah layar benar-benar kosong
-    final bool isListEmpty =
-        folderSkripsi.isEmpty &&
-        folderPekerjaan.isEmpty &&
-        folderLainnya.isEmpty;
+    // Mengecek apakah seluruh tugas kosong di semua folder
+    bool isListEmpty = true;
+    for (String folder in _folders) {
+      if (_getFilteredTasks(folder).isNotEmpty) {
+        isListEmpty = false;
+        break;
+      }
+    }
 
     return Scaffold(
       body: Stack(
@@ -322,9 +455,10 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            DateFormat('EEEE, dd MMM yyyy', 'id_ID').format(
-                              DateTime.now(),
-                            ), // Tanggal Hari Ini Asli (Opsional jika intl terpasang dengan locale)
+                            DateFormat(
+                              'EEEE, dd MMM yyyy',
+                              'id_ID',
+                            ).format(DateTime.now()),
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w500,
@@ -349,7 +483,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 28),
 
-                  // KOLOM PENCARIAN DINAMIS
                   Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
@@ -377,7 +510,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // MENU TAB INTERAKTIF
                   Row(
                     children: [
                       GestureDetector(
@@ -437,9 +569,8 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 24),
 
-                  // DAFTAR TUGAS
                   Expanded(
-                    child: isListEmpty
+                    child: isListEmpty && _folders.isEmpty
                         ? Center(
                             child: Text(
                               _searchQuery.isNotEmpty
@@ -452,63 +583,28 @@ class _HomeScreenState extends State<HomeScreen> {
                           )
                         : ListView(
                             physics: const BouncingScrollPhysics(),
-                            children: [
-                              if (folderSkripsi.isNotEmpty)
-                                FolderAccordion(
-                                  folderName: 'Semester 8 - Tugas Akhir',
-                                  taskCount: folderSkripsi.length,
-                                  tasks: folderSkripsi
-                                      .map(
-                                        (t) => TaskCard.fromMap(
-                                          t,
-                                          onDelete: () => _deleteTask(t['id']),
-                                          onToggleStatus: () =>
-                                              _toggleTaskStatus(t['id']),
-                                        ),
-                                      )
-                                      .toList(),
-                                ),
-                              if (folderPekerjaan.isNotEmpty)
-                                FolderAccordion(
-                                  folderName: 'Pekerjaan - UI/UX',
-                                  taskCount: folderPekerjaan.length,
-                                  tasks: folderPekerjaan
-                                      .map(
-                                        (t) => TaskCard.fromMap(
-                                          t,
-                                          onDelete: () => _deleteTask(t['id']),
-                                          onToggleStatus: () =>
-                                              _toggleTaskStatus(t['id']),
-                                        ),
-                                      )
-                                      .toList(),
-                                ),
-                              if (folderLainnya.isNotEmpty) ...[
-                                Padding(
-                                  padding: const EdgeInsets.only(
-                                    left: 8,
-                                    bottom: 12,
-                                    top: 8,
-                                  ),
-                                  child: Text(
-                                    'TUGAS LAINNYA',
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.grey.shade400,
-                                    ),
-                                  ),
-                                ),
-                                ...folderLainnya.map(
-                                  (t) => TaskCard.fromMap(
-                                    t,
-                                    onDelete: () => _deleteTask(t['id']),
-                                    onToggleStatus: () =>
-                                        _toggleTaskStatus(t['id']),
-                                  ),
-                                ),
-                              ],
-                            ],
+                            children: _folders.map((folderName) {
+                              final folderTasks = _getFilteredTasks(folderName);
+                              // Sembunyikan folder jika sedang mencari dan foldernya kosong
+                              if (folderTasks.isEmpty &&
+                                  _searchQuery.isNotEmpty) {
+                                return const SizedBox.shrink();
+                              }
+                              return FolderAccordion(
+                                folderName: folderName,
+                                taskCount: folderTasks.length,
+                                tasks: folderTasks
+                                    .map(
+                                      (t) => TaskCard.fromMap(
+                                        t,
+                                        onDelete: () => _deleteTask(t['id']),
+                                        onToggleStatus: () =>
+                                            _toggleTaskStatus(t['id']),
+                                      ),
+                                    )
+                                    .toList(),
+                              );
+                            }).toList(),
                           ),
                   ),
                 ],
@@ -536,6 +632,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     label: 'Tambah Folder',
                     onTap: () {
                       _toggleFab();
+                      _showAddFolderModal();
                     },
                   ),
                 const SizedBox(height: 12),
