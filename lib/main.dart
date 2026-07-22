@@ -20,7 +20,7 @@ class TideNoteApp extends StatelessWidget {
       title: 'TideNote',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        scaffoldBackgroundColor: const Color(0xFFF6F7F0), // Warna latar utama
+        scaffoldBackgroundColor: const Color(0xFFF6F7F0),
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF8DBEE1)),
         useMaterial3: true,
       ),
@@ -100,7 +100,7 @@ class _HomeScreenState extends State<HomeScreen>
           {
             'id': '1',
             'title': 'Revisi Proposal Skripsi',
-            'instruction': 'Perbaiki bab 2 sesuai arahan dosen pembimbing.',
+            'instruction': 'Perbaiki bab 2 sesuai arahan.',
             'deadline': DateTime.now().add(const Duration(hours: 12)),
             'status': 'To-Do',
             'isUrgent': true,
@@ -108,12 +108,12 @@ class _HomeScreenState extends State<HomeScreen>
           },
           {
             'id': '2',
-            'title': 'Desain Wireframe',
-            'instruction': 'Gunakan bentuk squircle dan warna pastel blue.',
-            'deadline': DateTime.now().add(const Duration(days: 1)),
-            'status': 'In Progress',
+            'title': 'Tugas Masa Lalu',
+            'instruction': 'Ini contoh tugas yang sudah lewat deadline.',
+            'deadline': DateTime.now().subtract(const Duration(days: 1)),
+            'status': 'To-Do',
             'isUrgent': false,
-            'folder': 'Pekerjaan - UI/UX',
+            'folder': 'Semester 8',
           },
         ];
       });
@@ -147,7 +147,6 @@ class _HomeScreenState extends State<HomeScreen>
     _saveTasks();
   }
 
-  // FUNGSI BARU: Menghapus Folder Beserta Isinya (Sudah diperbaiki dengan onPressed)
   void _deleteFolder(String folderName) {
     showDialog(
       context: context,
@@ -175,11 +174,9 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             onPressed: () {
               setState(() {
-                // Hapus folder dan anak-anak foldernya (1 level)
                 _folders.removeWhere(
                   (f) => f['name'] == folderName || f['parent'] == folderName,
                 );
-                // Hapus semua tugas yang ada di folder tersebut
                 _tasks.removeWhere((t) => t['folder'] == folderName);
               });
               _saveFolders();
@@ -224,9 +221,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   void _toggleFab() {
-    setState(() {
-      _isFabOpen = !_isFabOpen;
-    });
+    setState(() => _isFabOpen = !_isFabOpen);
   }
 
   // ==========================================
@@ -235,8 +230,9 @@ class _HomeScreenState extends State<HomeScreen>
   void _showAddFolderModal() {
     final TextEditingController folderController = TextEditingController();
     String? selectedParent;
+
+    // PEMBARUAN SPRINT 2: Semua folder bisa menjadi parent (Infinite Nested)
     List<String> availableParents = _folders
-        .where((f) => f['parent'] == null)
         .map((f) => f['name'] as String)
         .toList();
 
@@ -254,7 +250,7 @@ class _HomeScreenState extends State<HomeScreen>
                 _buildInputLabel('NAMA FOLDER'),
                 TextField(
                   controller: folderController,
-                  decoration: _inputDecoration('Misal: Semester 6'),
+                  decoration: _inputDecoration('Misal: Modul 1'),
                 ),
                 const SizedBox(height: 16),
                 _buildInputLabel('INDUK FOLDER (OPSIONAL)'),
@@ -448,7 +444,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   // ==========================================
-  // RENDER POHON FOLDER & TUGAS
+  // RENDER POHON FOLDER & TUGAS (SISTEM FILTER BARU)
   // ==========================================
   List<Map<String, dynamic>> _getFilteredTasks(String folderName) {
     return _tasks.where((task) {
@@ -461,9 +457,20 @@ class _HomeScreenState extends State<HomeScreen>
               task['instruction'].toString().toLowerCase().contains(
                 _searchQuery.toLowerCase(),
               ));
-      bool matchesTab = _selectedTabIndex == 0
-          ? task['status'] != 'Done'
-          : task['status'] == 'Done';
+
+      // LOGIKA OVERDUE
+      bool isOverdue =
+          task['deadline'].isBefore(DateTime.now()) && task['status'] != 'Done';
+
+      bool matchesTab = false;
+      if (_selectedTabIndex == 0) {
+        matchesTab = !isOverdue && task['status'] != 'Done';
+      } else if (_selectedTabIndex == 1) {
+        matchesTab = task['status'] == 'Done';
+      } else if (_selectedTabIndex == 2) {
+        matchesTab = isOverdue;
+      }
+
       return matchesFolder && matchesSearch && matchesTab;
     }).toList();
   }
@@ -487,8 +494,8 @@ class _HomeScreenState extends State<HomeScreen>
         .map((f) => f['name'] as String)
         .toList();
 
-    // Sembunyikan folder di tab Arsip jika tidak ada tugas yang selesai di dalamnya
-    if (_selectedTabIndex == 1 && tasks.isEmpty && subFolders.isEmpty)
+    // Sembunyikan folder jika tidak ada isinya sesuai tab yang dipilih
+    if (_selectedTabIndex != 0 && tasks.isEmpty && subFolders.isEmpty)
       return const SizedBox.shrink();
     if (tasks.isEmpty && subFolders.isEmpty && _searchQuery.isNotEmpty)
       return const SizedBox.shrink();
@@ -512,9 +519,36 @@ class _HomeScreenState extends State<HomeScreen>
       folderName: folderName,
       isSubFolder: isSub,
       taskCount: tasks.length,
-      onDelete: () =>
-          _deleteFolder(folderName), // Mengirim perintah hapus folder
+      onDelete: () => _deleteFolder(folderName),
       children: [...subFolderWidgets, ...taskWidgets],
+    );
+  }
+
+  Widget _buildTab(int index, String title) {
+    bool isSelected = _selectedTabIndex == index;
+    Color tabColor = index == 2 ? Colors.red.shade400 : const Color(0xFF8DBEE1);
+
+    return GestureDetector(
+      onTap: () => setState(() => _selectedTabIndex = index),
+      child: Container(
+        padding: const EdgeInsets.only(bottom: 4),
+        decoration: BoxDecoration(
+          border: Border(
+            bottom: BorderSide(
+              color: isSelected ? tabColor : Colors.transparent,
+              width: 2,
+            ),
+          ),
+        ),
+        child: Text(
+          title,
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.bold,
+            color: isSelected ? tabColor : Colors.grey.shade400,
+          ),
+        ),
+      ),
     );
   }
 
@@ -523,7 +557,6 @@ class _HomeScreenState extends State<HomeScreen>
     return Scaffold(
       body: Stack(
         children: [
-          // DEKORASI LATAR BELAKANG (HIASAN GEOMETRIS)
           Positioned(
             top: -100,
             right: -50,
@@ -638,62 +671,19 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                   const SizedBox(height: 24),
 
-                  Row(
-                    children: [
-                      GestureDetector(
-                        onTap: () => setState(() => _selectedTabIndex = 0),
-                        child: Container(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          decoration: BoxDecoration(
-                            border: Border(
-                              bottom: BorderSide(
-                                color: _selectedTabIndex == 0
-                                    ? const Color(0xFF8DBEE1)
-                                    : Colors.transparent,
-                                width: 2,
-                              ),
-                            ),
-                          ),
-                          child: Text(
-                            'Tugas Aktif',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: _selectedTabIndex == 0
-                                  ? const Color(0xFF8DBEE1)
-                                  : Colors.grey.shade400,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 24),
-                      GestureDetector(
-                        onTap: () => setState(() => _selectedTabIndex = 1),
-                        child: Container(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          decoration: BoxDecoration(
-                            border: Border(
-                              bottom: BorderSide(
-                                color: _selectedTabIndex == 1
-                                    ? const Color(0xFF8DBEE1)
-                                    : Colors.transparent,
-                                width: 2,
-                              ),
-                            ),
-                          ),
-                          child: Text(
-                            'Arsip Selesai',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: _selectedTabIndex == 1
-                                  ? const Color(0xFF8DBEE1)
-                                  : Colors.grey.shade400,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
+                  // TABS AREA BARU
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      children: [
+                        _buildTab(0, 'Tugas Aktif'),
+                        const SizedBox(width: 20),
+                        _buildTab(1, 'Arsip Selesai'),
+                        const SizedBox(width: 20),
+                        _buildTab(2, 'Tugas Terlambat'),
+                      ],
+                    ),
                   ),
                   const SizedBox(height: 24),
 
@@ -933,7 +923,7 @@ class FolderAccordion extends StatelessWidget {
   final int taskCount;
   final List<Widget> children;
   final bool isSubFolder;
-  final VoidCallback? onDelete; // Perintah Hapus
+  final VoidCallback? onDelete;
 
   const FolderAccordion({
     super.key,
@@ -1018,7 +1008,6 @@ class FolderAccordion extends StatelessWidget {
                     ),
                   ),
                 ),
-                // IKON HAPUS FOLDER (Kecuali folder default "Lainnya")
                 if (onDelete != null && folderName != 'Lainnya') ...[
                   const SizedBox(width: 8),
                   InkWell(
@@ -1044,7 +1033,6 @@ class FolderAccordion extends StatelessWidget {
               right: 16,
               bottom: 8,
             ),
-            // Teks placeholder jika folder kosong
             children: children.isEmpty
                 ? [
                     const Padding(
@@ -1068,7 +1056,7 @@ class FolderAccordion extends StatelessWidget {
 }
 
 // ==========================================
-// KOMPONEN: TASK CARD (DESAIN HIJAU UNTUK SELESAI)
+// KOMPONEN: TASK CARD (DENGAN LOGIKA OVERDUE)
 // ==========================================
 class TaskCard extends StatelessWidget {
   final String id, title, status;
@@ -1112,6 +1100,9 @@ class TaskCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     bool isDone = status == 'Done';
+    // CEK STATUS OVERDUE
+    bool isOverdue = deadline.isBefore(DateTime.now()) && !isDone;
+
     final difference = deadline.difference(DateTime.now()).inDays;
     Color deadlineColor = difference <= 1
         ? const Color(0xFFFCA5A5)
@@ -1141,11 +1132,16 @@ class TaskCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          // WARNA KARTU KETIKA SELESAI MENJADI HIJAU MUDA
-          color: isDone ? const Color(0xFFF0FDF4) : Colors.white,
+          // WARNA LATAR: Hijau jika selesai, Merah Muda jika lewat waktu, Putih jika normal
+          color: isDone
+              ? const Color(0xFFF0FDF4)
+              : (isOverdue ? const Color(0xFFFEF2F2) : Colors.white),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isDone ? const Color(0xFF86EFAC) : deadlineColor,
+            // WARNA BORDER: Sesuai kondisi
+            color: isDone
+                ? const Color(0xFF86EFAC)
+                : (isOverdue ? const Color(0xFFFCA5A5) : deadlineColor),
             width: 2,
           ),
         ),
@@ -1156,7 +1152,6 @@ class TaskCard extends StatelessWidget {
               children: [
                 Padding(
                   padding: const EdgeInsets.only(right: 40),
-                  // TEKS TIDAK LAGI DICORET, TAPI MENJADI HIJAU TUA
                   child: Text(
                     title,
                     style: TextStyle(
@@ -1164,7 +1159,9 @@ class TaskCard extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                       color: isDone
                           ? const Color(0xFF166534)
-                          : const Color(0xFF334155),
+                          : (isOverdue
+                                ? Colors.red.shade900
+                                : const Color(0xFF334155)),
                     ),
                   ),
                 ),
@@ -1178,7 +1175,9 @@ class TaskCard extends StatelessWidget {
                       fontSize: 12,
                       color: isDone
                           ? const Color(0xFF15803D)
-                          : Colors.grey.shade500,
+                          : (isOverdue
+                                ? Colors.red.shade700
+                                : Colors.grey.shade500),
                     ),
                   ),
                 ],
@@ -1186,7 +1185,9 @@ class TaskCard extends StatelessWidget {
                 Divider(
                   color: isDone
                       ? const Color(0xFFDCFCE7)
-                      : const Color(0xFFF1F5F9),
+                      : (isOverdue
+                            ? const Color(0xFFFECACA)
+                            : const Color(0xFFF1F5F9)),
                   height: 1,
                   thickness: 1,
                 ),
@@ -1201,7 +1202,9 @@ class TaskCard extends StatelessWidget {
                           size: 14,
                           color: isDone
                               ? const Color(0xFF22C55E)
-                              : Colors.grey.shade400,
+                              : (isOverdue
+                                    ? Colors.red.shade400
+                                    : Colors.grey.shade400),
                         ),
                         const SizedBox(width: 6),
                         Text(
@@ -1211,13 +1214,16 @@ class TaskCard extends StatelessWidget {
                             fontWeight: FontWeight.w600,
                             color: isDone
                                 ? const Color(0xFF166534)
-                                : Colors.grey.shade500,
+                                : (isOverdue
+                                      ? Colors.red.shade700
+                                      : Colors.grey.shade500),
                           ),
                         ),
                       ],
                     ),
                     GestureDetector(
-                      onTap: onToggleStatus,
+                      // KUNCI STATUS JIKA OVERDUE
+                      onTap: isOverdue ? null : onToggleStatus,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 12,
@@ -1226,21 +1232,25 @@ class TaskCard extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: isDone
                               ? const Color(0xFFDCFCE7)
-                              : (status == 'In Progress'
-                                    ? const Color(0xFFBFF4FF)
-                                    : Colors.grey.shade100),
+                              : (isOverdue
+                                    ? Colors.red.shade100
+                                    : (status == 'In Progress'
+                                          ? const Color(0xFFBFF4FF)
+                                          : Colors.grey.shade100)),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
-                          status,
+                          isOverdue ? 'Terlambat' : status,
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                             color: isDone
                                 ? const Color(0xFF15803D)
-                                : (status == 'In Progress'
-                                      ? const Color(0xFF5AB2D3)
-                                      : Colors.grey.shade600),
+                                : (isOverdue
+                                      ? Colors.red.shade700
+                                      : (status == 'In Progress'
+                                            ? const Color(0xFF5AB2D3)
+                                            : Colors.grey.shade600)),
                           ),
                         ),
                       ),
@@ -1259,12 +1269,15 @@ class TaskCard extends StatelessWidget {
                       : Icons.local_fire_department_outlined,
                   color: isDone
                       ? const Color(0xFF86EFAC)
-                      : (isUrgent
-                            ? Colors.orange.shade400
-                            : Colors.grey.shade300),
+                      : (isOverdue
+                            ? Colors.red.shade300
+                            : (isUrgent
+                                  ? Colors.orange.shade400
+                                  : Colors.grey.shade300)),
                   size: 24,
                 ),
-                onPressed: isDone ? null : onToggleUrgency,
+                // KUNCI URGENCY JIKA OVERDUE
+                onPressed: isDone || isOverdue ? null : onToggleUrgency,
               ),
             ),
           ],
