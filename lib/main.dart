@@ -1,15 +1,40 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:ui';
 import 'dart:convert';
-import 'dart:typed_data'; // Untuk memproses gambar
+import 'dart:typed_data';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:image_picker/image_picker.dart'; // Package Kamera & Galeri
+import 'package:image_picker/image_picker.dart';
+
+// MODUL NOTIFIKASI & WAKTU
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:timezone/data/latest_all.dart' as tz;
+import 'package:timezone/timezone.dart' as tz;
+
+// Inisialisasi Mesin Notifikasi Global
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await initializeDateFormatting('id_ID', null);
+
+  // Set zona waktu agar alarm akurat (WIB)
+  if (!kIsWeb) {
+    tz.initializeTimeZones();
+    tz.setLocalLocation(tz.getLocation('Asia/Jakarta'));
+
+    const AndroidInitializationSettings initializationSettingsAndroid =
+        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const InitializationSettings initializationSettings =
+        InitializationSettings(android: initializationSettingsAndroid);
+    await flutterLocalNotificationsPlugin.initialize(
+      settings: initializationSettings,
+    );
+  }
+
   runApp(const TideNoteApp());
 }
 
@@ -51,6 +76,141 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _loadData();
+    _requestNotificationPermission();
+  }
+
+  // ==========================================
+  // LOGIKA NOTIFIKASI PINTAR (HIJAU, KUNING, MERAH)
+  // (DIPERBARUI SESUAI VERSI TERBARU FLUTTER_LOCAL_NOTIFICATIONS)
+  // ==========================================
+  void _requestNotificationPermission() {
+    if (!kIsWeb) {
+      try {
+        flutterLocalNotificationsPlugin
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >()
+            ?.requestNotificationsPermission();
+        flutterLocalNotificationsPlugin
+            .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin
+            >()
+            ?.requestExactAlarmsPermission();
+      } catch (_) {
+        // Tidak semua environment mendukung platform notifications, termasuk test.
+      }
+    }
+  }
+
+  Future<void> scheduleTaskNotification(
+    String id,
+    String title,
+    DateTime deadline,
+  ) async {
+    if (kIsWeb) return;
+
+    await cancelTaskNotification(id);
+
+    const androidDetails = AndroidNotificationDetails(
+      'tidenote_channel',
+      'TideNote Smart Reminders',
+      channelDescription: 'Pengingat Notifikasi Pintar TideNote',
+      importance: Importance.max,
+      priority: Priority.high,
+      color: Color(0xFF8DBEE1),
+      icon: '@mipmap/ic_launcher',
+    );
+    const platformDetails = NotificationDetails(android: androidDetails);
+
+    final now = DateTime.now();
+    final difference = deadline.difference(now);
+
+    // 1. KATEGORI HIJAU (> 2 hari / > 48 jam) -> 1x Sehari (19.00 WIB)
+    if (difference.inHours > 48) {
+      var scheduledDate = DateTime(now.year, now.month, now.day, 19, 0);
+      if (scheduledDate.isBefore(now))
+        scheduledDate = scheduledDate.add(const Duration(days: 1));
+
+      if (scheduledDate.isBefore(deadline)) {
+        await flutterLocalNotificationsPlugin.zonedSchedule(
+          id: id.hashCode,
+          title: '🟢 TideNote: Status Aman',
+          body: 'Tugas "$title" masih memiliki waktu lebih dari 2 hari.',
+          scheduledDate: tz.TZDateTime.from(scheduledDate, tz.local),
+          notificationDetails: platformDetails,
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        );
+      }
+    }
+    // 2. KATEGORI KUNING (1 - 2 hari / 24-48 jam) -> 2x Sehari (08.00 & 19.00 WIB)
+    else if (difference.inHours >= 24 && difference.inHours <= 48) {
+      var morningTime = DateTime(now.year, now.month, now.day, 8, 0);
+      if (morningTime.isBefore(now))
+        morningTime = morningTime.add(const Duration(days: 1));
+
+      if (morningTime.isBefore(deadline)) {
+        await flutterLocalNotificationsPlugin.zonedSchedule(
+          id: id.hashCode + 1,
+          title: '🟡 TideNote Pengingat Pagi',
+          body:
+              'Tugas "$title" dikumpulkan besok! Tetap semangat menyelesaikannya.',
+          scheduledDate: tz.TZDateTime.from(morningTime, tz.local),
+          notificationDetails: platformDetails,
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        );
+      }
+
+      var eveningTime = DateTime(now.year, now.month, now.day, 19, 0);
+      if (eveningTime.isBefore(now))
+        eveningTime = eveningTime.add(const Duration(days: 1));
+
+      if (eveningTime.isBefore(deadline)) {
+        await flutterLocalNotificationsPlugin.zonedSchedule(
+          id: id.hashCode + 2,
+          title: '🟡 TideNote Pengingat Malam',
+          body: 'Jangan lupa cicil tugas "$title" sebelum besok.',
+          scheduledDate: tz.TZDateTime.from(eveningTime, tz.local),
+          notificationDetails: platformDetails,
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        );
+      }
+    }
+    // 3. KATEGORI MERAH (< 24 jam) -> 3x Sehari + 3 Jam Sblm Deadline
+    else if (difference.inHours < 24 && difference.inHours > 0) {
+      final emergencyTime = deadline.subtract(const Duration(hours: 3));
+      if (emergencyTime.isAfter(now)) {
+        await flutterLocalNotificationsPlugin.zonedSchedule(
+          id: id.hashCode + 3,
+          title: '🔴 PERINGATAN DARURAT!',
+          body: 'Waktu tersisa kurang dari 3 jam untuk tugas "$title"!',
+          scheduledDate: tz.TZDateTime.from(emergencyTime, tz.local),
+          notificationDetails: platformDetails,
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        );
+      }
+
+      var noonTime = DateTime(now.year, now.month, now.day, 13, 0);
+      if (noonTime.isAfter(now) && noonTime.isBefore(deadline)) {
+        await flutterLocalNotificationsPlugin.zonedSchedule(
+          id: id.hashCode + 4,
+          title: '🔴 TideNote: Mendekati Deadline',
+          body: 'Tugas "$title" harus dikumpulkan hari ini!',
+          scheduledDate: tz.TZDateTime.from(noonTime, tz.local),
+          notificationDetails: platformDetails,
+          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        );
+      }
+    }
+  }
+
+  Future<void> cancelTaskNotification(String id) async {
+    if (kIsWeb) return;
+    // Diperbarui: menggunakan int id langsung, bukan named parameter.
+    await flutterLocalNotificationsPlugin.cancel(id: id.hashCode);
+    await flutterLocalNotificationsPlugin.cancel(id: id.hashCode + 1);
+    await flutterLocalNotificationsPlugin.cancel(id: id.hashCode + 2);
+    await flutterLocalNotificationsPlugin.cancel(id: id.hashCode + 3);
+    await flutterLocalNotificationsPlugin.cancel(id: id.hashCode + 4);
   }
 
   // ==========================================
@@ -93,25 +253,10 @@ class _HomeScreenState extends State<HomeScreen>
             'status': item['status'],
             'isUrgent': item['isUrgent'],
             'folder': item['folder'],
-            'proofImage': item['proofImage'], // Memuat gambar bukti
+            'proofImage': item['proofImage'],
           };
         }).toList();
       });
-    } else {
-      setState(() {
-        _tasks = [
-          {
-            'id': '1',
-            'title': 'Revisi Proposal Skripsi',
-            'instruction': 'Perbaiki bab 2 sesuai arahan.',
-            'deadline': DateTime.now().add(const Duration(hours: 12)),
-            'status': 'To-Do',
-            'isUrgent': true,
-            'folder': 'Semester 8',
-          },
-        ];
-      });
-      _saveTasks();
     }
   }
 
@@ -124,8 +269,9 @@ class _HomeScreenState extends State<HomeScreen>
         'instruction': task['instruction'],
         'deadline': task['deadline'].toIso8601String(),
         'status': task['status'],
-        'isUrgent': task['isUrgent'], 'folder': task['folder'],
-        'proofImage': task['proofImage'], // Menyimpan gambar bukti
+        'isUrgent': task['isUrgent'],
+        'folder': task['folder'],
+        'proofImage': task['proofImage'],
       };
     }).toList();
     await prefs.setString('tidenote_data', json.encode(dataToSave));
@@ -138,6 +284,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   void _deleteTask(String id) {
     setState(() => _tasks.removeWhere((task) => task['id'] == id));
+    cancelTaskNotification(id);
     _saveTasks();
   }
 
@@ -151,7 +298,7 @@ class _HomeScreenState extends State<HomeScreen>
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         content: Text(
-          'Apakah kamu yakin ingin menghapus folder "$folderName" beserta seluruh tugas di dalamnya?',
+          'Apakah kamu yakin ingin menghapus folder "$folderName"?',
         ),
         actions: [
           TextButton(
@@ -171,6 +318,12 @@ class _HomeScreenState extends State<HomeScreen>
                 _folders.removeWhere(
                   (f) => f['name'] == folderName || f['parent'] == folderName,
                 );
+                final tasksToDelete = _tasks
+                    .where((t) => t['folder'] == folderName)
+                    .toList();
+                for (var t in tasksToDelete) {
+                  cancelTaskNotification(t['id']);
+                }
                 _tasks.removeWhere((t) => t['folder'] == folderName);
               });
               _saveFolders();
@@ -191,7 +344,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   // ==========================================
-  // LOGIKA BARU: UPLOAD BUKTI TUGAS
+  // LOGIKA STATUS & BUKTI FOTO
   // ==========================================
   void _toggleTaskStatus(String id) {
     final taskIndex = _tasks.indexWhere((task) => task['id'] == id);
@@ -199,15 +352,18 @@ class _HomeScreenState extends State<HomeScreen>
 
     final currentStatus = _tasks[taskIndex]['status'];
 
-    // Jika tugas mau diubah menjadi "Done", minta foto bukti
     if (currentStatus == 'To-Do' || currentStatus == 'In Progress') {
       _showProofPickerModal(taskIndex);
     } else {
-      // Jika tugas dikembalikan dari "Done" ke "To-Do", hapus buktinya
       setState(() {
         _tasks[taskIndex]['status'] = 'To-Do';
         _tasks[taskIndex].remove('proofImage');
       });
+      scheduleTaskNotification(
+        _tasks[taskIndex]['id'],
+        _tasks[taskIndex]['title'],
+        _tasks[taskIndex]['deadline'],
+      );
       _saveTasks();
     }
   }
@@ -216,15 +372,14 @@ class _HomeScreenState extends State<HomeScreen>
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.all(24),
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
+      builder: (ctx) => Material(
+        color: Colors.white,
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        clipBehavior: Clip.antiAlias,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            const SizedBox(height: 24),
             Container(
               width: 48,
               height: 6,
@@ -250,7 +405,6 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             const SizedBox(height: 24),
             ListTile(
-              contentPadding: EdgeInsets.zero,
               leading: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -273,7 +427,6 @@ class _HomeScreenState extends State<HomeScreen>
             ),
             const SizedBox(height: 12),
             ListTile(
-              contentPadding: EdgeInsets.zero,
               leading: Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -304,21 +457,18 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> _pickImage(int taskIndex, ImageSource source) async {
     try {
       final picker = ImagePicker();
-      // Mengkompresi gambar menjadi kualitas 30% agar tidak memberatkan Local Storage
       final pickedFile = await picker.pickImage(
         source: source,
         imageQuality: 30,
       );
-
       if (pickedFile != null) {
-        // Mengubah gambar menjadi kode Base64 agar bisa disimpan sebagai teks
         final bytes = await pickedFile.readAsBytes();
         final base64Image = base64Encode(bytes);
-
         setState(() {
           _tasks[taskIndex]['status'] = 'Done';
           _tasks[taskIndex]['proofImage'] = base64Image;
         });
+        cancelTaskNotification(_tasks[taskIndex]['id']);
         _saveTasks();
       }
     } catch (e) {
@@ -339,72 +489,8 @@ class _HomeScreenState extends State<HomeScreen>
   void _toggleFab() => setState(() => _isFabOpen = !_isFabOpen);
 
   // ==========================================
-  // MODAL FORMS (SAMA SEPERTI SEBELUMNYA)
+  // MODAL FORMS
   // ==========================================
-  void _showAddFolderModal() {
-    final TextEditingController folderController = TextEditingController();
-    String? selectedParent;
-    List<String> availableParents = _folders
-        .map((f) => f['name'] as String)
-        .toList();
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return _buildFormContainer(
-              ctx,
-              'Tambah Folder',
-              children: [
-                _buildInputLabel('NAMA FOLDER'),
-                TextField(
-                  controller: folderController,
-                  decoration: _inputDecoration('Misal: Modul 1'),
-                ),
-                const SizedBox(height: 16),
-                _buildInputLabel('INDUK FOLDER (OPSIONAL)'),
-                DropdownButtonFormField<String>(
-                  value: selectedParent,
-                  decoration: _inputDecoration('-- Jadikan Folder Utama --'),
-                  items: [
-                    const DropdownMenuItem<String>(
-                      value: null,
-                      child: Text('-- Jadikan Folder Utama --'),
-                    ),
-                    ...availableParents.map(
-                      (folder) => DropdownMenuItem<String>(
-                        value: folder,
-                        child: Text(folder),
-                      ),
-                    ),
-                  ],
-                  onChanged: (val) => setModalState(() => selectedParent = val),
-                ),
-                const SizedBox(height: 32),
-                _buildSubmitButton('Buat Folder', () {
-                  final folderName = folderController.text.trim();
-                  if (folderName.isEmpty) return;
-                  setState(() {
-                    if (!_folders.any((f) => f['name'] == folderName))
-                      _folders.add({
-                        'name': folderName,
-                        'parent': selectedParent,
-                      });
-                  });
-                  _saveFolders();
-                  Navigator.pop(ctx);
-                }),
-              ],
-            );
-          },
-        );
-      },
-    );
-  }
-
   void _showAddTaskModal() {
     final TextEditingController titleController = TextEditingController();
     final TextEditingController instructionController = TextEditingController();
@@ -532,9 +618,11 @@ class _HomeScreenState extends State<HomeScreen>
                 const SizedBox(height: 24),
                 _buildSubmitButton('Simpan Tugas', () {
                   if (titleController.text.trim().isEmpty) return;
+
+                  final newId = DateTime.now().toString();
                   setState(() {
                     _tasks.add({
-                      'id': DateTime.now().toString(),
+                      'id': newId,
                       'title': titleController.text,
                       'instruction': instructionController.text,
                       'deadline': selectedDeadline,
@@ -543,7 +631,77 @@ class _HomeScreenState extends State<HomeScreen>
                       'folder': selectedFolder ?? 'Lainnya',
                     });
                   });
+
+                  scheduleTaskNotification(
+                    newId,
+                    titleController.text,
+                    selectedDeadline,
+                  );
+
                   _saveTasks();
+                  Navigator.pop(ctx);
+                }),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showAddFolderModal() {
+    final TextEditingController folderController = TextEditingController();
+    String? selectedParent;
+    List<String> availableParents = _folders
+        .map((f) => f['name'] as String)
+        .toList();
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return _buildFormContainer(
+              ctx,
+              'Tambah Folder',
+              children: [
+                _buildInputLabel('NAMA FOLDER'),
+                TextField(
+                  controller: folderController,
+                  decoration: _inputDecoration('Misal: Modul 1'),
+                ),
+                const SizedBox(height: 16),
+                _buildInputLabel('INDUK FOLDER (OPSIONAL)'),
+                DropdownButtonFormField<String>(
+                  value: selectedParent,
+                  decoration: _inputDecoration('-- Jadikan Folder Utama --'),
+                  items: [
+                    const DropdownMenuItem<String>(
+                      value: null,
+                      child: Text('-- Jadikan Folder Utama --'),
+                    ),
+                    ...availableParents.map(
+                      (folder) => DropdownMenuItem<String>(
+                        value: folder,
+                        child: Text(folder),
+                      ),
+                    ),
+                  ],
+                  onChanged: (val) => setModalState(() => selectedParent = val),
+                ),
+                const SizedBox(height: 32),
+                _buildSubmitButton('Buat Folder', () {
+                  final folderName = folderController.text.trim();
+                  if (folderName.isEmpty) return;
+                  setState(() {
+                    if (!_folders.any((f) => f['name'] == folderName))
+                      _folders.add({
+                        'name': folderName,
+                        'parent': selectedParent,
+                      });
+                  });
+                  _saveFolders();
                   Navigator.pop(ctx);
                 }),
               ],
@@ -567,15 +725,14 @@ class _HomeScreenState extends State<HomeScreen>
               ));
       bool isOverdue =
           task['deadline'].isBefore(DateTime.now()) && task['status'] != 'Done';
-
       bool matchesTab = false;
-      if (_selectedTabIndex == 0)
+      if (_selectedTabIndex == 0) {
         matchesTab = !isOverdue && task['status'] != 'Done';
-      else if (_selectedTabIndex == 1)
+      } else if (_selectedTabIndex == 1) {
         matchesTab = task['status'] == 'Done';
-      else if (_selectedTabIndex == 2)
+      } else if (_selectedTabIndex == 2) {
         matchesTab = isOverdue;
-
+      }
       return matchesFolder && matchesSearch && matchesTab;
     }).toList();
   }
@@ -598,12 +755,10 @@ class _HomeScreenState extends State<HomeScreen>
         .where((f) => f['parent'] == folderName)
         .map((f) => f['name'] as String)
         .toList();
-
     if (_selectedTabIndex != 0 && tasks.isEmpty && subFolders.isEmpty)
       return const SizedBox.shrink();
     if (tasks.isEmpty && subFolders.isEmpty && _searchQuery.isNotEmpty)
       return const SizedBox.shrink();
-
     List<Widget> taskWidgets = tasks
         .map(
           (t) => TaskCard.fromMap(
@@ -617,7 +772,6 @@ class _HomeScreenState extends State<HomeScreen>
     List<Widget> subFolderWidgets = subFolders
         .map((subName) => _buildAccordion(subName, isSub: true))
         .toList();
-
     return FolderAccordion(
       folderName: folderName,
       isSubFolder: isSub,
@@ -630,7 +784,6 @@ class _HomeScreenState extends State<HomeScreen>
   Widget _buildTab(int index, String title) {
     bool isSelected = _selectedTabIndex == index;
     Color tabColor = index == 2 ? Colors.red.shade400 : const Color(0xFF8DBEE1);
-
     return GestureDetector(
       onTap: () => setState(() => _selectedTabIndex = index),
       child: Container(
@@ -734,7 +887,7 @@ class _HomeScreenState extends State<HomeScreen>
                           ],
                         ),
                         child: const Icon(
-                          Icons.notifications_none_rounded,
+                          Icons.notifications_active_rounded,
                           color: Color(0xFF8DBEE1),
                         ),
                       ),
@@ -1016,7 +1169,6 @@ class FolderAccordion extends StatelessWidget {
   final List<Widget> children;
   final bool isSubFolder;
   final VoidCallback? onDelete;
-
   const FolderAccordion({
     super.key,
     required this.folderName,
@@ -1025,7 +1177,6 @@ class FolderAccordion extends StatelessWidget {
     this.isSubFolder = false,
     this.onDelete,
   });
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -1038,19 +1189,11 @@ class FolderAccordion extends StatelessWidget {
               ),
             )
           : null,
-      child: Container(
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.transparent, width: 1.5),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.02),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
+      child: Material(
+        color: Colors.white,
+        elevation: 0,
+        borderRadius: BorderRadius.circular(20),
+        clipBehavior: Clip.antiAlias,
         child: Theme(
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
           child: ExpansionTile(
@@ -1149,11 +1292,10 @@ class FolderAccordion extends StatelessWidget {
 
 class TaskCard extends StatelessWidget {
   final String id, title, status;
-  final String? instruction, proofImage; // Variabel baru untuk gambar
+  final String? instruction, proofImage;
   final DateTime deadline;
   final bool isUrgent;
   final VoidCallback onDelete, onToggleStatus, onToggleUrgency;
-
   const TaskCard({
     super.key,
     required this.id,
@@ -1167,7 +1309,6 @@ class TaskCard extends StatelessWidget {
     required this.onToggleStatus,
     required this.onToggleUrgency,
   });
-
   factory TaskCard.fromMap(
     Map<String, dynamic> data, {
     required VoidCallback onDelete,
@@ -1187,7 +1328,6 @@ class TaskCard extends StatelessWidget {
       onToggleUrgency: onToggleUrgency,
     );
   }
-
   @override
   Widget build(BuildContext context) {
     bool isDone = status == 'Done';
@@ -1279,8 +1419,6 @@ class TaskCard extends StatelessWidget {
                   thickness: 1,
                 ),
                 const SizedBox(height: 12),
-
-                // AREA TAMPILAN GAMBAR BUKTI (Hanya muncul jika ada gambarnya)
                 if (isDone && proofImage != null) ...[
                   ClipRRect(
                     borderRadius: BorderRadius.circular(12),
@@ -1293,7 +1431,6 @@ class TaskCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                 ],
-
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
