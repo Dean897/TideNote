@@ -20,7 +20,7 @@ class TideNoteApp extends StatelessWidget {
       title: 'TideNote',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        scaffoldBackgroundColor: const Color(0xFFF6F7F0),
+        scaffoldBackgroundColor: const Color(0xFFF6F7F0), // Warna latar utama
         colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF8DBEE1)),
         useMaterial3: true,
       ),
@@ -40,7 +40,7 @@ class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   bool _isFabOpen = false;
   List<Map<String, dynamic>> _tasks = [];
-  List<Map<String, dynamic>> _folders = []; // Berubah mendukung parent (Nested)
+  List<Map<String, dynamic>> _folders = [];
 
   String _searchQuery = '';
   int _selectedTabIndex = 0;
@@ -59,7 +59,6 @@ class _HomeScreenState extends State<HomeScreen>
     final String? savedTasks = prefs.getString('tidenote_data');
     final String? savedFolders = prefs.getString('tidenote_folders');
 
-    // Muat Folder (Migrasi otomatis jika data lama berupa String biasa)
     if (savedFolders != null) {
       final List<dynamic> decoded = json.decode(savedFolders);
       setState(() {
@@ -73,14 +72,13 @@ class _HomeScreenState extends State<HomeScreen>
       setState(() {
         _folders = [
           {'name': 'Tugas Kuliah', 'parent': null},
-          {'name': 'Semester 8', 'parent': 'Tugas Kuliah'}, // Contoh Nested
+          {'name': 'Semester 8', 'parent': 'Tugas Kuliah'},
           {'name': 'Pekerjaan - UI/UX', 'parent': null},
         ];
       });
       _saveFolders();
     }
 
-    // Muat Tugas
     if (savedTasks != null) {
       final List<dynamic> decodedData = json.decode(savedTasks);
       setState(() {
@@ -149,6 +147,58 @@ class _HomeScreenState extends State<HomeScreen>
     _saveTasks();
   }
 
+  // FUNGSI BARU: Menghapus Folder Beserta Isinya (Sudah diperbaiki dengan onPressed)
+  void _deleteFolder(String folderName) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Text(
+          'Hapus Folder?',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          'Apakah kamu yakin ingin menghapus folder "$folderName" beserta seluruh tugas di dalamnya?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text(
+              'Batal',
+              style: TextStyle(color: Colors.blueGrey),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade400,
+              elevation: 0,
+            ),
+            onPressed: () {
+              setState(() {
+                // Hapus folder dan anak-anak foldernya (1 level)
+                _folders.removeWhere(
+                  (f) => f['name'] == folderName || f['parent'] == folderName,
+                );
+                // Hapus semua tugas yang ada di folder tersebut
+                _tasks.removeWhere((t) => t['folder'] == folderName);
+              });
+              _saveFolders();
+              _saveTasks();
+              Navigator.pop(ctx);
+            },
+            child: const Text(
+              'Hapus',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _toggleTaskStatus(String id) {
     setState(() {
       final taskIndex = _tasks.indexWhere((task) => task['id'] == id);
@@ -180,149 +230,11 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   // ==========================================
-  // MODAL: NOTIFIKASI PINTAR (Sesuai Gambar 10)
-  // ==========================================
-  void _showNotificationModal() {
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return Dialog(
-          backgroundColor: Colors.white,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFDFF6FF),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.smart_toy_rounded,
-                    color: Color(0xFF8DBEE1),
-                    size: 32,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Sistem Notifikasi Pintar',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF334155),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'TideNote mengingatkan Anda berdasarkan sisa waktu deadline secara otomatis:',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
-                ),
-                const SizedBox(height: 24),
-                _buildNotifLegend(
-                  Colors.green.shade100,
-                  Colors.green,
-                  'Hijau (> 2 hari):',
-                  '1x sehari (Pukul 19.00)',
-                ),
-                _buildNotifLegend(
-                  Colors.yellow.shade100,
-                  Colors.amber,
-                  'Kuning (1-2 hari):',
-                  '2x sehari (08.00 & 19.00)',
-                ),
-                _buildNotifLegend(
-                  Colors.red.shade50,
-                  Colors.red.shade400,
-                  'Merah (< 24 jam):',
-                  '3x sehari + 3 jam sblm deadline',
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFF6F7F0),
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text(
-                      'Mengerti',
-                      style: TextStyle(
-                        color: Color(0xFF334155),
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildNotifLegend(
-    Color bgColor,
-    Color dotColor,
-    String title,
-    String desc,
-  ) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            margin: const EdgeInsets.only(top: 4),
-            width: 10,
-            height: 10,
-            decoration: BoxDecoration(color: dotColor, shape: BoxShape.circle),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: RichText(
-              text: TextSpan(
-                style: const TextStyle(fontSize: 13, color: Color(0xFF334155)),
-                children: [
-                  TextSpan(
-                    text: '$title ',
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  TextSpan(text: desc),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ==========================================
-  // MODAL: TAMBAH FOLDER NESTED (Sesuai Gambar 4)
+  // MODAL FORMS (Tambah Tugas & Folder)
   // ==========================================
   void _showAddFolderModal() {
     final TextEditingController folderController = TextEditingController();
     String? selectedParent;
-
-    // Ambil folder yang bisa jadi parent (hindari rekursif tak terhingga)
     List<String> availableParents = _folders
         .where((f) => f['parent'] == null)
         .map((f) => f['name'] as String)
@@ -386,9 +298,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ==========================================
-  // MODAL: TAMBAH TUGAS (Sesuai Gambar 2)
-  // ==========================================
   void _showAddTaskModal() {
     final TextEditingController titleController = TextEditingController();
     final TextEditingController instructionController = TextEditingController();
@@ -415,7 +324,6 @@ class _HomeScreenState extends State<HomeScreen>
                   decoration: _inputDecoration('Misal: Laporan Akhir'),
                 ),
                 const SizedBox(height: 16),
-
                 _buildInputLabel('PILIH FOLDER'),
                 DropdownButtonFormField<String>(
                   value: selectedFolder,
@@ -435,7 +343,6 @@ class _HomeScreenState extends State<HomeScreen>
                   onChanged: (val) => setModalState(() => selectedFolder = val),
                 ),
                 const SizedBox(height: 16),
-
                 _buildInputLabel('INSTRUKSI / CATATAN'),
                 TextField(
                   controller: instructionController,
@@ -445,7 +352,6 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
                 const SizedBox(height: 16),
-
                 _buildInputLabel('DEADLINE WAKTU'),
                 InkWell(
                   onTap: () async {
@@ -460,17 +366,16 @@ class _HomeScreenState extends State<HomeScreen>
                         context: context,
                         initialTime: TimeOfDay.fromDateTime(selectedDeadline),
                       );
-                      if (time != null) {
-                        setModalState(() {
-                          selectedDeadline = DateTime(
+                      if (time != null)
+                        setModalState(
+                          () => selectedDeadline = DateTime(
                             date.year,
                             date.month,
                             date.day,
                             time.hour,
                             time.minute,
-                          );
-                        });
-                      }
+                          ),
+                        );
                     }
                   },
                   child: Container(
@@ -503,7 +408,6 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                 ),
                 const SizedBox(height: 12),
-
                 Row(
                   children: [
                     Checkbox(
@@ -543,119 +447,8 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // Komponen pembantu untuk UI Form Modal agar rapi
-  Widget _buildFormContainer(
-    BuildContext context,
-    String title, {
-    required List<Widget> children,
-  }) {
-    return Container(
-      padding: EdgeInsets.only(
-        bottom: MediaQuery.of(context).viewInsets.bottom,
-        left: 24,
-        right: 24,
-        top: 24,
-      ),
-      decoration: const BoxDecoration(
-        color: Color(0xFFF6F7F0),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF334155),
-                ),
-              ),
-              InkWell(
-                onTap: () => Navigator.pop(context),
-                child: Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: Colors.blueGrey.withOpacity(0.1),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(
-                    Icons.close_rounded,
-                    size: 20,
-                    color: Colors.blueGrey,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 24),
-          ...children,
-          const SizedBox(height: 24),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildInputLabel(String text) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8, left: 4),
-      child: Text(
-        text,
-        style: TextStyle(
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-          color: Colors.blueGrey.shade400,
-          letterSpacing: 0.5,
-        ),
-      ),
-    );
-  }
-
-  InputDecoration _inputDecoration(String hint) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
-      filled: true,
-      fillColor: Colors.white,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(16),
-        borderSide: BorderSide.none,
-      ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-    );
-  }
-
-  Widget _buildSubmitButton(String text, VoidCallback onTap) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF8DBEE1),
-          elevation: 0,
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-        ),
-        onPressed: onTap,
-        child: Text(
-          text,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    );
-  }
-
   // ==========================================
-  // RENDER POHON FOLDER & TUGAS (Nested Logika)
+  // RENDER POHON FOLDER & TUGAS
   // ==========================================
   List<Map<String, dynamic>> _getFilteredTasks(String folderName) {
     return _tasks.where((task) {
@@ -676,15 +469,12 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   List<Widget> _buildFolderTree() {
-    // Ambil folder utama (yang tidak punya parent)
     final rootFolders = _folders
         .where((f) => f['parent'] == null)
         .map((f) => f['name'] as String)
         .toList();
-    // Tambah kategori "Lainnya" untuk tugas tanpa folder
     if (!_folders.any((f) => f['name'] == 'Lainnya'))
       rootFolders.add('Lainnya');
-
     return rootFolders
         .map((rootName) => _buildAccordion(rootName, isSub: false))
         .toList();
@@ -692,16 +482,17 @@ class _HomeScreenState extends State<HomeScreen>
 
   Widget _buildAccordion(String folderName, {required bool isSub}) {
     final tasks = _getFilteredTasks(folderName);
-    // Cari folder anak dari folder ini
     final subFolders = _folders
         .where((f) => f['parent'] == folderName)
         .map((f) => f['name'] as String)
         .toList();
 
+    // Sembunyikan folder di tab Arsip jika tidak ada tugas yang selesai di dalamnya
+    if (_selectedTabIndex == 1 && tasks.isEmpty && subFolders.isEmpty)
+      return const SizedBox.shrink();
     if (tasks.isEmpty && subFolders.isEmpty && _searchQuery.isNotEmpty)
       return const SizedBox.shrink();
 
-    // Map List Tugas menjadi TaskCard
     List<Widget> taskWidgets = tasks
         .map(
           (t) => TaskCard.fromMap(
@@ -713,7 +504,6 @@ class _HomeScreenState extends State<HomeScreen>
         )
         .toList();
 
-    // Map List Folder Anak
     List<Widget> subFolderWidgets = subFolders
         .map((subName) => _buildAccordion(subName, isSub: true))
         .toList();
@@ -722,6 +512,8 @@ class _HomeScreenState extends State<HomeScreen>
       folderName: folderName,
       isSubFolder: isSub,
       taskCount: tasks.length,
+      onDelete: () =>
+          _deleteFolder(folderName), // Mengirim perintah hapus folder
       children: [...subFolderWidgets, ...taskWidgets],
     );
   }
@@ -731,13 +523,38 @@ class _HomeScreenState extends State<HomeScreen>
     return Scaffold(
       body: Stack(
         children: [
+          // DEKORASI LATAR BELAKANG (HIASAN GEOMETRIS)
+          Positioned(
+            top: -100,
+            right: -50,
+            child: Container(
+              width: 300,
+              height: 300,
+              decoration: BoxDecoration(
+                color: const Color(0xFF8DBEE1).withOpacity(0.12),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -50,
+            left: -100,
+            child: Container(
+              width: 250,
+              height: 250,
+              decoration: BoxDecoration(
+                color: const Color(0xFF8DBEE1).withOpacity(0.10),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(24.0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Header
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -762,35 +579,45 @@ class _HomeScreenState extends State<HomeScreen>
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w500,
-                              color: Colors.grey.shade500,
+                              color: Colors.grey.shade600,
                             ),
                           ),
                         ],
                       ),
-                      InkWell(
-                        onTap: _showNotificationModal, // Klik Notifikasi
-                        child: Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: const Icon(
-                            Icons.notifications_none_rounded,
-                            color: Color(0xFF8DBEE1),
-                          ),
+                      Container(
+                        width: 48,
+                        height: 48,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.02),
+                              blurRadius: 10,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.notifications_none_rounded,
+                          color: Color(0xFF8DBEE1),
                         ),
                       ),
                     ],
                   ),
                   const SizedBox(height: 28),
 
-                  // Search
                   Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
                       borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.02),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
                     ),
                     child: TextField(
                       onChanged: (value) =>
@@ -811,7 +638,6 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                   const SizedBox(height: 24),
 
-                  // Tabs
                   Row(
                     children: [
                       GestureDetector(
@@ -871,7 +697,6 @@ class _HomeScreenState extends State<HomeScreen>
                   ),
                   const SizedBox(height: 24),
 
-                  // Content Area
                   Expanded(
                     child: ListView(
                       physics: const BouncingScrollPhysics(),
@@ -883,7 +708,6 @@ class _HomeScreenState extends State<HomeScreen>
             ),
           ),
 
-          // Blur Latar FAB
           if (_isFabOpen)
             GestureDetector(
               onTap: _toggleFab,
@@ -893,7 +717,6 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ),
 
-          // FAB dengan Animasi Slide & Fade
           Positioned(
             bottom: 32,
             right: 24,
@@ -964,55 +787,153 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // Desain tombol FAB yang baru sesuai Gambar 6
-  Widget _buildFabOption({
-    required IconData icon,
-    required String label,
-    required VoidCallback onTap,
+  // Komponen pembantu UI
+  Widget _buildFormContainer(
+    BuildContext context,
+    String title, {
+    required List<Widget> children,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Row(
+    return Container(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+        left: 24,
+        right: 24,
+        top: 24,
+      ),
+      decoration: const BoxDecoration(
+        color: Color(0xFFF6F7F0),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Text(
-              label,
-              style: const TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF334155),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF334155),
+                ),
               ),
-            ),
+              InkWell(
+                onTap: () => Navigator.pop(context),
+                child: Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.blueGrey.withOpacity(0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.close_rounded,
+                    size: 20,
+                    color: Colors.blueGrey,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 12),
-          Container(
-            width: 48,
-            height: 48,
-            decoration: const BoxDecoration(
-              color: Color(0xFF8DBEE1),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: Colors.white, size: 24),
-          ),
+          const SizedBox(height: 24),
+          ...children,
+          const SizedBox(height: 24),
         ],
       ),
     );
   }
+
+  Widget _buildInputLabel(String text) => Padding(
+    padding: const EdgeInsets.only(bottom: 8, left: 4),
+    child: Text(
+      text,
+      style: TextStyle(
+        fontSize: 12,
+        fontWeight: FontWeight.bold,
+        color: Colors.blueGrey.shade400,
+        letterSpacing: 0.5,
+      ),
+    ),
+  );
+  InputDecoration _inputDecoration(String hint) => InputDecoration(
+    hintText: hint,
+    hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+    filled: true,
+    fillColor: Colors.white,
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(16),
+      borderSide: BorderSide.none,
+    ),
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+  );
+  Widget _buildSubmitButton(String text, VoidCallback onPressed) => SizedBox(
+    width: double.infinity,
+    child: ElevatedButton(
+      style: ElevatedButton.styleFrom(
+        backgroundColor: const Color(0xFF8DBEE1),
+        elevation: 0,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      ),
+      onPressed: onPressed,
+      child: Text(
+        text,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
+    ),
+  );
+  Widget _buildFabOption({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) => GestureDetector(
+    onTap: onTap,
+    child: Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Text(
+            label,
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF334155),
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Container(
+          width: 48,
+          height: 48,
+          decoration: const BoxDecoration(
+            color: Color(0xFF8DBEE1),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, color: Colors.white, size: 24),
+        ),
+      ],
+    ),
+  );
 }
 
 // ==========================================
-// KOMPONEN: FOLDER ACCORDION (Mendukung Nested)
+// KOMPONEN: FOLDER ACCORDION (DENGAN TONG SAMPAH)
 // ==========================================
 class FolderAccordion extends StatelessWidget {
   final String folderName;
   final int taskCount;
   final List<Widget> children;
   final bool isSubFolder;
+  final VoidCallback? onDelete; // Perintah Hapus
 
   const FolderAccordion({
     super.key,
@@ -1020,16 +941,13 @@ class FolderAccordion extends StatelessWidget {
     required this.taskCount,
     required this.children,
     this.isSubFolder = false,
+    this.onDelete,
   });
 
   @override
   Widget build(BuildContext context) {
-    // Jika folder kosong, jangan tampilkan apa-apa
-    if (children.isEmpty) return const SizedBox.shrink();
-
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      // Efek visual jika ini adalah sub-folder (menjorok ke dalam dengan garis kiri)
       padding: isSubFolder ? const EdgeInsets.only(left: 16) : EdgeInsets.zero,
       decoration: isSubFolder
           ? const BoxDecoration(
@@ -1042,7 +960,14 @@ class FolderAccordion extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.grey.shade100, width: 1.5),
+          border: Border.all(color: Colors.transparent, width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.02),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
         ),
         child: Theme(
           data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -1072,27 +997,69 @@ class FolderAccordion extends StatelessWidget {
                 color: const Color(0xFF334155),
               ),
             ),
-            trailing: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                '$taskCount',
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.grey,
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '$taskCount',
+                    style: const TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.grey,
+                    ),
+                  ),
                 ),
-              ),
+                // IKON HAPUS FOLDER (Kecuali folder default "Lainnya")
+                if (onDelete != null && folderName != 'Lainnya') ...[
+                  const SizedBox(width: 8),
+                  InkWell(
+                    onTap: onDelete,
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        Icons.delete_outline_rounded,
+                        size: 16,
+                        color: Colors.red.shade400,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
             ),
             childrenPadding: const EdgeInsets.only(
               left: 16,
               right: 16,
               bottom: 8,
             ),
-            children: children,
+            // Teks placeholder jika folder kosong
+            children: children.isEmpty
+                ? [
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 16),
+                      child: Text(
+                        'Belum ada tugas di folder ini',
+                        style: TextStyle(
+                          color: Colors.grey,
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ),
+                  ]
+                : children,
           ),
         ),
       ),
@@ -1101,7 +1068,7 @@ class FolderAccordion extends StatelessWidget {
 }
 
 // ==========================================
-// KOMPONEN: TASK CARD (Dengan Ikon Api Interaktif)
+// KOMPONEN: TASK CARD (DESAIN HIJAU UNTUK SELESAI)
 // ==========================================
 class TaskCard extends StatelessWidget {
   final String id, title, status;
@@ -1174,10 +1141,11 @@ class TaskCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: isDone ? Colors.grey.shade50 : Colors.white,
+          // WARNA KARTU KETIKA SELESAI MENJADI HIJAU MUDA
+          color: isDone ? const Color(0xFFF0FDF4) : Colors.white,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isDone ? Colors.transparent : deadlineColor,
+            color: isDone ? const Color(0xFF86EFAC) : deadlineColor,
             width: 2,
           ),
         ),
@@ -1188,12 +1156,15 @@ class TaskCard extends StatelessWidget {
               children: [
                 Padding(
                   padding: const EdgeInsets.only(right: 40),
+                  // TEKS TIDAK LAGI DICORET, TAPI MENJADI HIJAU TUA
                   child: Text(
                     title,
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      decoration: isDone ? TextDecoration.lineThrough : null,
+                      color: isDone
+                          ? const Color(0xFF166534)
+                          : const Color(0xFF334155),
                     ),
                   ),
                 ),
@@ -1203,12 +1174,19 @@ class TaskCard extends StatelessWidget {
                     instruction!,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isDone
+                          ? const Color(0xFF15803D)
+                          : Colors.grey.shade500,
+                    ),
                   ),
                 ],
                 const SizedBox(height: 16),
-                const Divider(
-                  color: Color(0xFFF1F5F9),
+                Divider(
+                  color: isDone
+                      ? const Color(0xFFDCFCE7)
+                      : const Color(0xFFF1F5F9),
                   height: 1,
                   thickness: 1,
                 ),
@@ -1221,7 +1199,9 @@ class TaskCard extends StatelessWidget {
                         Icon(
                           Icons.calendar_today_rounded,
                           size: 14,
-                          color: Colors.grey.shade400,
+                          color: isDone
+                              ? const Color(0xFF22C55E)
+                              : Colors.grey.shade400,
                         ),
                         const SizedBox(width: 6),
                         Text(
@@ -1229,7 +1209,9 @@ class TaskCard extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: Colors.grey.shade500,
+                            color: isDone
+                                ? const Color(0xFF166534)
+                                : Colors.grey.shade500,
                           ),
                         ),
                       ],
@@ -1243,10 +1225,10 @@ class TaskCard extends StatelessWidget {
                         ),
                         decoration: BoxDecoration(
                           color: isDone
-                              ? Colors.green.shade50
-                              : status == 'In Progress'
-                              ? const Color(0xFFBFF4FF)
-                              : Colors.grey.shade100,
+                              ? const Color(0xFFDCFCE7)
+                              : (status == 'In Progress'
+                                    ? const Color(0xFFBFF4FF)
+                                    : Colors.grey.shade100),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
@@ -1255,10 +1237,10 @@ class TaskCard extends StatelessWidget {
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                             color: isDone
-                                ? Colors.green.shade600
-                                : status == 'In Progress'
-                                ? const Color(0xFF5AB2D3)
-                                : Colors.grey.shade600,
+                                ? const Color(0xFF15803D)
+                                : (status == 'In Progress'
+                                      ? const Color(0xFF5AB2D3)
+                                      : Colors.grey.shade600),
                           ),
                         ),
                       ),
@@ -1267,7 +1249,6 @@ class TaskCard extends StatelessWidget {
                 ),
               ],
             ),
-            // Ikon Api Interaktif (Bisa diklik)
             Positioned(
               top: -4,
               right: -4,
@@ -1277,15 +1258,13 @@ class TaskCard extends StatelessWidget {
                       ? Icons.local_fire_department_rounded
                       : Icons.local_fire_department_outlined,
                   color: isDone
-                      ? Colors.transparent
+                      ? const Color(0xFF86EFAC)
                       : (isUrgent
                             ? Colors.orange.shade400
                             : Colors.grey.shade300),
                   size: 24,
                 ),
-                onPressed: isDone
-                    ? null
-                    : onToggleUrgency, // Klik untuk menyalakan/mematikan
+                onPressed: isDone ? null : onToggleUrgency,
               ),
             ),
           ],
