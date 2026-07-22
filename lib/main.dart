@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'dart:convert';
+import 'dart:typed_data'; // Untuk memproses gambar
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:image_picker/image_picker.dart'; // Package Kamera & Galeri
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -91,6 +93,7 @@ class _HomeScreenState extends State<HomeScreen>
             'status': item['status'],
             'isUrgent': item['isUrgent'],
             'folder': item['folder'],
+            'proofImage': item['proofImage'], // Memuat gambar bukti
           };
         }).toList();
       });
@@ -104,15 +107,6 @@ class _HomeScreenState extends State<HomeScreen>
             'deadline': DateTime.now().add(const Duration(hours: 12)),
             'status': 'To-Do',
             'isUrgent': true,
-            'folder': 'Semester 8',
-          },
-          {
-            'id': '2',
-            'title': 'Tugas Masa Lalu',
-            'instruction': 'Ini contoh tugas yang sudah lewat deadline.',
-            'deadline': DateTime.now().subtract(const Duration(days: 1)),
-            'status': 'To-Do',
-            'isUrgent': false,
             'folder': 'Semester 8',
           },
         ];
@@ -130,8 +124,8 @@ class _HomeScreenState extends State<HomeScreen>
         'instruction': task['instruction'],
         'deadline': task['deadline'].toIso8601String(),
         'status': task['status'],
-        'isUrgent': task['isUrgent'],
-        'folder': task['folder'],
+        'isUrgent': task['isUrgent'], 'folder': task['folder'],
+        'proofImage': task['proofImage'], // Menyimpan gambar bukti
       };
     }).toList();
     await prefs.setString('tidenote_data', json.encode(dataToSave));
@@ -196,42 +190,160 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  // ==========================================
+  // LOGIKA BARU: UPLOAD BUKTI TUGAS
+  // ==========================================
   void _toggleTaskStatus(String id) {
-    setState(() {
-      final taskIndex = _tasks.indexWhere((task) => task['id'] == id);
-      if (taskIndex != -1) {
-        final currentStatus = _tasks[taskIndex]['status'];
-        _tasks[taskIndex]['status'] = currentStatus == 'To-Do'
-            ? 'In Progress'
-            : (currentStatus == 'In Progress' ? 'Done' : 'To-Do');
+    final taskIndex = _tasks.indexWhere((task) => task['id'] == id);
+    if (taskIndex == -1) return;
+
+    final currentStatus = _tasks[taskIndex]['status'];
+
+    // Jika tugas mau diubah menjadi "Done", minta foto bukti
+    if (currentStatus == 'To-Do' || currentStatus == 'In Progress') {
+      _showProofPickerModal(taskIndex);
+    } else {
+      // Jika tugas dikembalikan dari "Done" ke "To-Do", hapus buktinya
+      setState(() {
+        _tasks[taskIndex]['status'] = 'To-Do';
+        _tasks[taskIndex].remove('proofImage');
+      });
+      _saveTasks();
+    }
+  }
+
+  void _showProofPickerModal(int taskIndex) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(24),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 48,
+              height: 6,
+              decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const Text(
+              'Upload Bukti Tugas',
+              style: TextStyle(
+                fontSize: 20,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF334155),
+              ),
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Wajib menyertakan foto agar status menjadi Selesai.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: Colors.grey),
+            ),
+            const SizedBox(height: 24),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDFF6FF),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.camera_alt_rounded,
+                  color: Color(0xFF8DBEE1),
+                ),
+              ),
+              title: const Text(
+                'Ambil dari Kamera',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickImage(taskIndex, ImageSource.camera);
+              },
+            ),
+            const SizedBox(height: 12),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFDFF6FF),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.photo_library_rounded,
+                  color: Color(0xFF8DBEE1),
+                ),
+              ),
+              title: const Text(
+                'Pilih dari Galeri',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              onTap: () {
+                Navigator.pop(ctx);
+                _pickImage(taskIndex, ImageSource.gallery);
+              },
+            ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickImage(int taskIndex, ImageSource source) async {
+    try {
+      final picker = ImagePicker();
+      // Mengkompresi gambar menjadi kualitas 30% agar tidak memberatkan Local Storage
+      final pickedFile = await picker.pickImage(
+        source: source,
+        imageQuality: 30,
+      );
+
+      if (pickedFile != null) {
+        // Mengubah gambar menjadi kode Base64 agar bisa disimpan sebagai teks
+        final bytes = await pickedFile.readAsBytes();
+        final base64Image = base64Encode(bytes);
+
+        setState(() {
+          _tasks[taskIndex]['status'] = 'Done';
+          _tasks[taskIndex]['proofImage'] = base64Image;
+        });
+        _saveTasks();
       }
-    });
-    _saveTasks();
+    } catch (e) {
+      debugPrint("Gagal mengambil gambar: $e");
+    }
   }
 
   void _toggleTaskUrgency(String id) {
     setState(() {
       final taskIndex = _tasks.indexWhere((task) => task['id'] == id);
-      if (taskIndex != -1) {
+      if (taskIndex != -1)
         _tasks[taskIndex]['isUrgent'] =
             !(_tasks[taskIndex]['isUrgent'] ?? false);
-      }
     });
     _saveTasks();
   }
 
-  void _toggleFab() {
-    setState(() => _isFabOpen = !_isFabOpen);
-  }
+  void _toggleFab() => setState(() => _isFabOpen = !_isFabOpen);
 
   // ==========================================
-  // MODAL FORMS (Tambah Tugas & Folder)
+  // MODAL FORMS (SAMA SEPERTI SEBELUMNYA)
   // ==========================================
   void _showAddFolderModal() {
     final TextEditingController folderController = TextEditingController();
     String? selectedParent;
-
-    // PEMBARUAN SPRINT 2: Semua folder bisa menjadi parent (Infinite Nested)
     List<String> availableParents = _folders
         .map((f) => f['name'] as String)
         .toList();
@@ -276,12 +388,11 @@ class _HomeScreenState extends State<HomeScreen>
                   final folderName = folderController.text.trim();
                   if (folderName.isEmpty) return;
                   setState(() {
-                    if (!_folders.any((f) => f['name'] == folderName)) {
+                    if (!_folders.any((f) => f['name'] == folderName))
                       _folders.add({
                         'name': folderName,
                         'parent': selectedParent,
                       });
-                    }
                   });
                   _saveFolders();
                   Navigator.pop(ctx);
@@ -443,9 +554,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // ==========================================
-  // RENDER POHON FOLDER & TUGAS (SISTEM FILTER BARU)
-  // ==========================================
   List<Map<String, dynamic>> _getFilteredTasks(String folderName) {
     return _tasks.where((task) {
       bool matchesFolder = task['folder'] == folderName;
@@ -457,19 +565,16 @@ class _HomeScreenState extends State<HomeScreen>
               task['instruction'].toString().toLowerCase().contains(
                 _searchQuery.toLowerCase(),
               ));
-
-      // LOGIKA OVERDUE
       bool isOverdue =
           task['deadline'].isBefore(DateTime.now()) && task['status'] != 'Done';
 
       bool matchesTab = false;
-      if (_selectedTabIndex == 0) {
+      if (_selectedTabIndex == 0)
         matchesTab = !isOverdue && task['status'] != 'Done';
-      } else if (_selectedTabIndex == 1) {
+      else if (_selectedTabIndex == 1)
         matchesTab = task['status'] == 'Done';
-      } else if (_selectedTabIndex == 2) {
+      else if (_selectedTabIndex == 2)
         matchesTab = isOverdue;
-      }
 
       return matchesFolder && matchesSearch && matchesTab;
     }).toList();
@@ -494,7 +599,6 @@ class _HomeScreenState extends State<HomeScreen>
         .map((f) => f['name'] as String)
         .toList();
 
-    // Sembunyikan folder jika tidak ada isinya sesuai tab yang dipilih
     if (_selectedTabIndex != 0 && tasks.isEmpty && subFolders.isEmpty)
       return const SizedBox.shrink();
     if (tasks.isEmpty && subFolders.isEmpty && _searchQuery.isNotEmpty)
@@ -510,7 +614,6 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         )
         .toList();
-
     List<Widget> subFolderWidgets = subFolders
         .map((subName) => _buildAccordion(subName, isSub: true))
         .toList();
@@ -581,7 +684,6 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ),
           ),
-
           SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(24.0),
@@ -639,7 +741,6 @@ class _HomeScreenState extends State<HomeScreen>
                     ],
                   ),
                   const SizedBox(height: 28),
-
                   Container(
                     decoration: BoxDecoration(
                       color: Colors.white,
@@ -670,8 +771,6 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                   const SizedBox(height: 24),
-
-                  // TABS AREA BARU
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     physics: const BouncingScrollPhysics(),
@@ -686,7 +785,6 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                   ),
                   const SizedBox(height: 24),
-
                   Expanded(
                     child: ListView(
                       physics: const BouncingScrollPhysics(),
@@ -697,7 +795,6 @@ class _HomeScreenState extends State<HomeScreen>
               ),
             ),
           ),
-
           if (_isFabOpen)
             GestureDetector(
               onTap: _toggleFab,
@@ -706,7 +803,6 @@ class _HomeScreenState extends State<HomeScreen>
                 child: Container(color: Colors.white.withOpacity(0.4)),
               ),
             ),
-
           Positioned(
             bottom: 32,
             right: 24,
@@ -777,7 +873,6 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  // Komponen pembantu UI
   Widget _buildFormContainer(
     BuildContext context,
     String title, {
@@ -915,9 +1010,6 @@ class _HomeScreenState extends State<HomeScreen>
   );
 }
 
-// ==========================================
-// KOMPONEN: FOLDER ACCORDION (DENGAN TONG SAMPAH)
-// ==========================================
 class FolderAccordion extends StatelessWidget {
   final String folderName;
   final int taskCount;
@@ -1055,12 +1147,9 @@ class FolderAccordion extends StatelessWidget {
   }
 }
 
-// ==========================================
-// KOMPONEN: TASK CARD (DENGAN LOGIKA OVERDUE)
-// ==========================================
 class TaskCard extends StatelessWidget {
   final String id, title, status;
-  final String? instruction;
+  final String? instruction, proofImage; // Variabel baru untuk gambar
   final DateTime deadline;
   final bool isUrgent;
   final VoidCallback onDelete, onToggleStatus, onToggleUrgency;
@@ -1070,6 +1159,7 @@ class TaskCard extends StatelessWidget {
     required this.id,
     required this.title,
     this.instruction,
+    this.proofImage,
     required this.deadline,
     required this.status,
     required this.isUrgent,
@@ -1088,6 +1178,7 @@ class TaskCard extends StatelessWidget {
       id: data['id'],
       title: data['title'],
       instruction: data['instruction'],
+      proofImage: data['proofImage'],
       deadline: data['deadline'],
       status: data['status'],
       isUrgent: data['isUrgent'] ?? false,
@@ -1100,9 +1191,7 @@ class TaskCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     bool isDone = status == 'Done';
-    // CEK STATUS OVERDUE
     bool isOverdue = deadline.isBefore(DateTime.now()) && !isDone;
-
     final difference = deadline.difference(DateTime.now()).inDays;
     Color deadlineColor = difference <= 1
         ? const Color(0xFFFCA5A5)
@@ -1132,13 +1221,11 @@ class TaskCard extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 16),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          // WARNA LATAR: Hijau jika selesai, Merah Muda jika lewat waktu, Putih jika normal
           color: isDone
               ? const Color(0xFFF0FDF4)
               : (isOverdue ? const Color(0xFFFEF2F2) : Colors.white),
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            // WARNA BORDER: Sesuai kondisi
             color: isDone
                 ? const Color(0xFF86EFAC)
                 : (isOverdue ? const Color(0xFFFCA5A5) : deadlineColor),
@@ -1192,6 +1279,21 @@ class TaskCard extends StatelessWidget {
                   thickness: 1,
                 ),
                 const SizedBox(height: 12),
+
+                // AREA TAMPILAN GAMBAR BUKTI (Hanya muncul jika ada gambarnya)
+                if (isDone && proofImage != null) ...[
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.memory(
+                      base64Decode(proofImage!),
+                      width: double.infinity,
+                      height: 120,
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                ],
+
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -1222,7 +1324,6 @@ class TaskCard extends StatelessWidget {
                       ],
                     ),
                     GestureDetector(
-                      // KUNCI STATUS JIKA OVERDUE
                       onTap: isOverdue ? null : onToggleStatus,
                       child: Container(
                         padding: const EdgeInsets.symmetric(
@@ -1276,7 +1377,6 @@ class TaskCard extends StatelessWidget {
                                   : Colors.grey.shade300)),
                   size: 24,
                 ),
-                // KUNCI URGENCY JIKA OVERDUE
                 onPressed: isDone || isOverdue ? null : onToggleUrgency,
               ),
             ),
