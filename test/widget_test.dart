@@ -22,4 +22,17 @@ void main() {
     expect(find.byType(MaterialApp), findsOneWidget);
     expect(find.byType(HomeScreen), findsOneWidget);
   });
+
+  testWidgets('Bell icon opens notification guide', (
+    WidgetTester tester,
+  ) async {
+    await initializeDateFormatting('id_ID', null);
+    await tester.pumpWidget(const TideNoteApp());
+
+    await tester.tap(find.byIcon(Icons.notifications_active_rounded));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Sistem Notifikasi Pintar'), findsOneWidget);
+    expect(find.text('Mengerti'), findsOneWidget);
+  });
 }

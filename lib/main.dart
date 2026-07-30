@@ -102,6 +102,181 @@ class _HomeScreenState extends State<HomeScreen>
     }
   }
 
+  Future<void> _refreshPendingNotifications() async {
+    for (final task in _tasks) {
+      if (task['status'] != 'Done') {
+        await scheduleTaskNotification(
+          task['id'],
+          task['title'],
+          task['deadline'],
+        );
+      }
+    }
+  }
+
+  Future<void> _showNotificationGuide() async {
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return Dialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 20,
+            vertical: 24,
+          ),
+          backgroundColor: Colors.transparent,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(32),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.12),
+                  blurRadius: 30,
+                  offset: const Offset(0, 18),
+                ),
+              ],
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 120,
+                    height: 120,
+                    decoration: const BoxDecoration(
+                      color: Color(0xFFCFEFFF),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.smart_toy_outlined,
+                      size: 64,
+                      color: Color(0xFF8DBEE1),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Sistem Notifikasi Pintar',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      color: Color(0xFF334155),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'TideNote mengingatkan Anda berdasarkan sisa waktu deadline secara otomatis:',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 18,
+                      height: 1.35,
+                      color: Color(0xFF64748B),
+                    ),
+                  ),
+                  const SizedBox(height: 22),
+                  _buildNotificationGuideCard(
+                    color: const Color(0xFF7AD97C),
+                    tint: const Color(0xFFEAFBE7),
+                    title: 'Hijau (> 2 hari)',
+                    description: '1x sehari (Pukul 19.00)',
+                  ),
+                  const SizedBox(height: 14),
+                  _buildNotificationGuideCard(
+                    color: const Color(0xFFF4C542),
+                    tint: const Color(0xFFFFF7D8),
+                    title: 'Kuning (1-2 hari)',
+                    description: '2x sehari (08.00 & 19.00)',
+                  ),
+                  const SizedBox(height: 14),
+                  _buildNotificationGuideCard(
+                    color: const Color(0xFFE97777),
+                    tint: const Color(0xFFFFF0F0),
+                    title: 'Merah (< 24 jam)',
+                    description: '3x sehari + 3 jam sebelum deadline',
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFFF1F5F9),
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(22),
+                        ),
+                      ),
+                      onPressed: () => Navigator.pop(dialogContext),
+                      child: const Text(
+                        'Mengerti',
+                        style: TextStyle(
+                          color: Color(0xFF475569),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildNotificationGuideCard({
+    required Color color,
+    required Color tint,
+    required String title,
+    required String description,
+  }) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+      decoration: BoxDecoration(
+        color: tint,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: color.withOpacity(0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 20,
+            height: 20,
+            margin: const EdgeInsets.only(top: 4),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: const TextStyle(
+                  fontSize: 16,
+                  height: 1.35,
+                  color: Color(0xFF475569),
+                ),
+                children: [
+                  TextSpan(
+                    text: '$title: ',
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  TextSpan(text: description),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> scheduleTaskNotification(
     String id,
     String title,
@@ -110,6 +285,8 @@ class _HomeScreenState extends State<HomeScreen>
     if (kIsWeb) return;
 
     await cancelTaskNotification(id);
+    final now = DateTime.now();
+    if (!deadline.isAfter(now)) return;
 
     const androidDetails = AndroidNotificationDetails(
       'tidenote_channel',
@@ -119,83 +296,158 @@ class _HomeScreenState extends State<HomeScreen>
       priority: Priority.high,
       color: Color(0xFF8DBEE1),
       icon: '@mipmap/ic_launcher',
+      playSound: true,
+      enableVibration: true,
+      category: AndroidNotificationCategory.reminder,
     );
     const platformDetails = NotificationDetails(android: androidDetails);
-
-    final now = DateTime.now();
-    final difference = deadline.difference(now);
+    final remaining = deadline.difference(now);
 
     // 1. KATEGORI HIJAU (> 2 hari / > 48 jam) -> 1x Sehari (19.00 WIB)
-    if (difference.inHours > 48) {
-      var scheduledDate = DateTime(now.year, now.month, now.day, 19, 0);
-      if (scheduledDate.isBefore(now))
-        scheduledDate = scheduledDate.add(const Duration(days: 1));
-
-      if (scheduledDate.isBefore(deadline)) {
-        await flutterLocalNotificationsPlugin.zonedSchedule(
-          id: id.hashCode,
-          title: '🟢 TideNote: Status Aman',
-          body: 'Tugas "$title" masih memiliki waktu lebih dari 2 hari.',
-          scheduledDate: tz.TZDateTime.from(scheduledDate, tz.local),
-          notificationDetails: platformDetails,
-          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        );
+    if (remaining > const Duration(hours: 48)) {
+      for (var dayOffset = 0; ; dayOffset++) {
+        final scheduledDate = DateTime(
+          now.year,
+          now.month,
+          now.day,
+          19,
+          0,
+        ).add(Duration(days: dayOffset));
+        if (!scheduledDate.isBefore(deadline)) break;
+        if (scheduledDate.isAfter(now)) {
+          await flutterLocalNotificationsPlugin.zonedSchedule(
+            id: id.hashCode + dayOffset,
+            title: '🟢 TideNote: Status Aman',
+            body: 'Tugas "$title" masih memiliki waktu lebih dari 2 hari.',
+            scheduledDate: tz.TZDateTime.from(scheduledDate, tz.local),
+            notificationDetails: platformDetails,
+            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          );
+        }
       }
     }
     // 2. KATEGORI KUNING (1 - 2 hari / 24-48 jam) -> 2x Sehari (08.00 & 19.00 WIB)
-    else if (difference.inHours >= 24 && difference.inHours <= 48) {
-      var morningTime = DateTime(now.year, now.month, now.day, 8, 0);
-      if (morningTime.isBefore(now))
-        morningTime = morningTime.add(const Duration(days: 1));
-
-      if (morningTime.isBefore(deadline)) {
-        await flutterLocalNotificationsPlugin.zonedSchedule(
-          id: id.hashCode + 1,
-          title: '🟡 TideNote Pengingat Pagi',
-          body:
-              'Tugas "$title" dikumpulkan besok! Tetap semangat menyelesaikannya.',
-          scheduledDate: tz.TZDateTime.from(morningTime, tz.local),
-          notificationDetails: platformDetails,
-          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+    else if (remaining >= const Duration(hours: 24)) {
+      for (var dayOffset = 0; ; dayOffset++) {
+        final dayBase = DateTime(
+          now.year,
+          now.month,
+          now.day,
+        ).add(Duration(days: dayOffset));
+        final morningTime = DateTime(
+          dayBase.year,
+          dayBase.month,
+          dayBase.day,
+          8,
         );
-      }
-
-      var eveningTime = DateTime(now.year, now.month, now.day, 19, 0);
-      if (eveningTime.isBefore(now))
-        eveningTime = eveningTime.add(const Duration(days: 1));
-
-      if (eveningTime.isBefore(deadline)) {
-        await flutterLocalNotificationsPlugin.zonedSchedule(
-          id: id.hashCode + 2,
-          title: '🟡 TideNote Pengingat Malam',
-          body: 'Jangan lupa cicil tugas "$title" sebelum besok.',
-          scheduledDate: tz.TZDateTime.from(eveningTime, tz.local),
-          notificationDetails: platformDetails,
-          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+        final eveningTime = DateTime(
+          dayBase.year,
+          dayBase.month,
+          dayBase.day,
+          19,
         );
+
+        if (morningTime.isBefore(deadline) && morningTime.isAfter(now)) {
+          await flutterLocalNotificationsPlugin.zonedSchedule(
+            id: id.hashCode + (dayOffset * 10) + 1,
+            title: '🟡 TideNote Pengingat Pagi',
+            body:
+                'Tugas "$title" dikumpulkan besok! Tetap semangat menyelesaikannya.',
+            scheduledDate: tz.TZDateTime.from(morningTime, tz.local),
+            notificationDetails: platformDetails,
+            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          );
+        }
+
+        if (eveningTime.isBefore(deadline) && eveningTime.isAfter(now)) {
+          await flutterLocalNotificationsPlugin.zonedSchedule(
+            id: id.hashCode + (dayOffset * 10) + 2,
+            title: '🟡 TideNote Pengingat Malam',
+            body: 'Jangan lupa cicil tugas "$title" sebelum besok.',
+            scheduledDate: tz.TZDateTime.from(eveningTime, tz.local),
+            notificationDetails: platformDetails,
+            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          );
+        }
+
+        if (!morningTime.isBefore(deadline) &&
+            !eveningTime.isBefore(deadline)) {
+          break;
+        }
       }
     }
     // 3. KATEGORI MERAH (< 24 jam) -> 3x Sehari + 3 Jam Sblm Deadline
-    else if (difference.inHours < 24 && difference.inHours > 0) {
+    else if (remaining > Duration.zero) {
+      for (var dayOffset = 0; ; dayOffset++) {
+        final dayBase = DateTime(
+          now.year,
+          now.month,
+          now.day,
+        ).add(Duration(days: dayOffset));
+        final morningTime = DateTime(
+          dayBase.year,
+          dayBase.month,
+          dayBase.day,
+          8,
+        );
+        final noonTime = DateTime(dayBase.year, dayBase.month, dayBase.day, 13);
+        final eveningTime = DateTime(
+          dayBase.year,
+          dayBase.month,
+          dayBase.day,
+          19,
+        );
+
+        if (morningTime.isBefore(deadline) && morningTime.isAfter(now)) {
+          await flutterLocalNotificationsPlugin.zonedSchedule(
+            id: id.hashCode + (dayOffset * 10) + 3,
+            title: '🔴 TideNote: Pagi Ini',
+            body:
+                'Deadline tugas "$title" sudah sangat dekat. Mulai dikerjakan sekarang.',
+            scheduledDate: tz.TZDateTime.from(morningTime, tz.local),
+            notificationDetails: platformDetails,
+            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          );
+        }
+
+        if (noonTime.isBefore(deadline) && noonTime.isAfter(now)) {
+          await flutterLocalNotificationsPlugin.zonedSchedule(
+            id: id.hashCode + (dayOffset * 10) + 4,
+            title: '🔴 TideNote: Siang Ini',
+            body:
+                'Sisa waktu untuk tugas "$title" tinggal sedikit. Tetap lanjutkan pengerjaan.',
+            scheduledDate: tz.TZDateTime.from(noonTime, tz.local),
+            notificationDetails: platformDetails,
+            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          );
+        }
+
+        if (eveningTime.isBefore(deadline) && eveningTime.isAfter(now)) {
+          await flutterLocalNotificationsPlugin.zonedSchedule(
+            id: id.hashCode + (dayOffset * 10) + 5,
+            title: '🔴 TideNote: Malam Ini',
+            body:
+                'Jangan tunda lagi, tugas "$title" harus segera diselesaikan.',
+            scheduledDate: tz.TZDateTime.from(eveningTime, tz.local),
+            notificationDetails: platformDetails,
+            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+          );
+        }
+
+        if (!morningTime.isBefore(deadline) &&
+            !noonTime.isBefore(deadline) &&
+            !eveningTime.isBefore(deadline)) {
+          break;
+        }
+      }
+
       final emergencyTime = deadline.subtract(const Duration(hours: 3));
       if (emergencyTime.isAfter(now)) {
         await flutterLocalNotificationsPlugin.zonedSchedule(
-          id: id.hashCode + 3,
+          id: id.hashCode + 6,
           title: '🔴 PERINGATAN DARURAT!',
           body: 'Waktu tersisa kurang dari 3 jam untuk tugas "$title"!',
           scheduledDate: tz.TZDateTime.from(emergencyTime, tz.local),
-          notificationDetails: platformDetails,
-          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        );
-      }
-
-      var noonTime = DateTime(now.year, now.month, now.day, 13, 0);
-      if (noonTime.isAfter(now) && noonTime.isBefore(deadline)) {
-        await flutterLocalNotificationsPlugin.zonedSchedule(
-          id: id.hashCode + 4,
-          title: '🔴 TideNote: Mendekati Deadline',
-          body: 'Tugas "$title" harus dikumpulkan hari ini!',
-          scheduledDate: tz.TZDateTime.from(noonTime, tz.local),
           notificationDetails: platformDetails,
           androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         );
@@ -206,11 +458,9 @@ class _HomeScreenState extends State<HomeScreen>
   Future<void> cancelTaskNotification(String id) async {
     if (kIsWeb) return;
     // Diperbarui: menggunakan int id langsung, bukan named parameter.
-    await flutterLocalNotificationsPlugin.cancel(id: id.hashCode);
-    await flutterLocalNotificationsPlugin.cancel(id: id.hashCode + 1);
-    await flutterLocalNotificationsPlugin.cancel(id: id.hashCode + 2);
-    await flutterLocalNotificationsPlugin.cancel(id: id.hashCode + 3);
-    await flutterLocalNotificationsPlugin.cancel(id: id.hashCode + 4);
+    for (var offset = 0; offset < 240; offset++) {
+      await flutterLocalNotificationsPlugin.cancel(id: id.hashCode + offset);
+    }
   }
 
   // ==========================================
@@ -257,6 +507,7 @@ class _HomeScreenState extends State<HomeScreen>
           };
         }).toList();
       });
+      await _refreshPendingNotifications();
     }
   }
 
@@ -886,9 +1137,16 @@ class _HomeScreenState extends State<HomeScreen>
                             ),
                           ],
                         ),
-                        child: const Icon(
-                          Icons.notifications_active_rounded,
-                          color: Color(0xFF8DBEE1),
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(20),
+                            onTap: _showNotificationGuide,
+                            child: const Icon(
+                              Icons.notifications_active_rounded,
+                              color: Color(0xFF8DBEE1),
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -1332,12 +1590,12 @@ class TaskCard extends StatelessWidget {
   Widget build(BuildContext context) {
     bool isDone = status == 'Done';
     bool isOverdue = deadline.isBefore(DateTime.now()) && !isDone;
-    final difference = deadline.difference(DateTime.now()).inDays;
-    Color deadlineColor = difference <= 1
-        ? const Color(0xFFFCA5A5)
-        : difference <= 2
+    final remaining = deadline.difference(DateTime.now());
+    Color deadlineColor = remaining > const Duration(hours: 48)
+        ? const Color(0xFF86EFAC)
+        : remaining >= const Duration(hours: 24)
         ? const Color(0xFFFDE047)
-        : const Color(0xFF86EFAC);
+        : const Color(0xFFFCA5A5);
 
     return Dismissible(
       key: Key(id),
