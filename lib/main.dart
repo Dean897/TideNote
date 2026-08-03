@@ -2,11 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'dart:ui';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:intl/intl.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image_picker/image_picker.dart';
+import 'utils/proof_image_saver.dart';
 
 // MODUL NOTIFIKASI & WAKTU
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
@@ -109,6 +109,7 @@ class _HomeScreenState extends State<HomeScreen>
           task['id'],
           task['title'],
           task['deadline'],
+          instruction: task['instruction']?.toString(),
         );
       }
     }
@@ -203,6 +204,32 @@ class _HomeScreenState extends State<HomeScreen>
                     width: double.infinity,
                     child: ElevatedButton(
                       style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF8DBEE1),
+                        elevation: 0,
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(22),
+                        ),
+                      ),
+                      onPressed: () async {
+                        Navigator.pop(dialogContext);
+                        await _showTestNotification();
+                      },
+                      child: const Text(
+                        'Kirim Notifikasi Tes',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
                         backgroundColor: const Color(0xFFF1F5F9),
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(vertical: 16),
@@ -277,16 +304,48 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
+  Future<void> _showTestNotification() async {
+    if (kIsWeb) return;
+
+    debugPrint('[TideNote] test notification requested');
+
+    const androidDetails = AndroidNotificationDetails(
+      'tidenote_channel',
+      'TideNote Smart Reminders',
+      channelDescription: 'Pengingat Notifikasi Pintar TideNote',
+      importance: Importance.max,
+      priority: Priority.high,
+      color: Color(0xFF8DBEE1),
+      icon: '@mipmap/ic_launcher',
+      playSound: true,
+      enableVibration: true,
+      category: AndroidNotificationCategory.reminder,
+    );
+
+    await flutterLocalNotificationsPlugin.show(
+      id: DateTime.now().millisecondsSinceEpoch.remainder(1 << 31),
+      title: '🧪 TideNote Test',
+      body: 'Ini adalah notifikasi tes sistem dari TideNote.',
+      notificationDetails: const NotificationDetails(android: androidDetails),
+    );
+  }
+
   Future<void> scheduleTaskNotification(
     String id,
     String title,
-    DateTime deadline,
-  ) async {
+    DateTime deadline, {
+    String? instruction,
+  }) async {
     if (kIsWeb) return;
 
     await cancelTaskNotification(id);
     final now = DateTime.now();
     if (!deadline.isAfter(now)) return;
+    final baseNotificationId = id.hashCode & 0x7fffffff;
+
+    debugPrint(
+      '[TideNote] scheduleTaskNotification id=$id title="$title" deadline=$deadline now=$now',
+    );
 
     const androidDetails = AndroidNotificationDetails(
       'tidenote_channel',
@@ -302,9 +361,11 @@ class _HomeScreenState extends State<HomeScreen>
     );
     const platformDetails = NotificationDetails(android: androidDetails);
     final remaining = deadline.difference(now);
+    final hasInstruction = instruction != null && instruction.trim().isNotEmpty;
 
     // 1. KATEGORI HIJAU (> 2 hari / > 48 jam) -> 1x Sehari (19.00 WIB)
     if (remaining > const Duration(hours: 48)) {
+      debugPrint('[TideNote] notification category=green remaining=$remaining');
       for (var dayOffset = 0; ; dayOffset++) {
         final scheduledDate = DateTime(
           now.year,
@@ -315,19 +376,26 @@ class _HomeScreenState extends State<HomeScreen>
         ).add(Duration(days: dayOffset));
         if (!scheduledDate.isBefore(deadline)) break;
         if (scheduledDate.isAfter(now)) {
-          await flutterLocalNotificationsPlugin.zonedSchedule(
-            id: id.hashCode + dayOffset,
+          await _scheduleAndroidNotification(
+            id: baseNotificationId + dayOffset,
             title: '🟢 TideNote: Status Aman',
-            body: 'Tugas "$title" masih memiliki waktu lebih dari 2 hari.',
-            scheduledDate: tz.TZDateTime.from(scheduledDate, tz.local),
+            body: _buildNotificationBody(
+              fallback:
+                  'Tugas "$title" masih memiliki waktu lebih dari 2 hari.',
+              title: title,
+              instruction: hasInstruction ? instruction : null,
+            ),
+            scheduledDate: scheduledDate,
             notificationDetails: platformDetails,
-            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
           );
         }
       }
     }
     // 2. KATEGORI KUNING (1 - 2 hari / 24-48 jam) -> 2x Sehari (08.00 & 19.00 WIB)
     else if (remaining >= const Duration(hours: 24)) {
+      debugPrint(
+        '[TideNote] notification category=yellow remaining=$remaining',
+      );
       for (var dayOffset = 0; ; dayOffset++) {
         final dayBase = DateTime(
           now.year,
@@ -348,25 +416,31 @@ class _HomeScreenState extends State<HomeScreen>
         );
 
         if (morningTime.isBefore(deadline) && morningTime.isAfter(now)) {
-          await flutterLocalNotificationsPlugin.zonedSchedule(
-            id: id.hashCode + (dayOffset * 10) + 1,
+          await _scheduleAndroidNotification(
+            id: baseNotificationId + (dayOffset * 10) + 1,
             title: '🟡 TideNote Pengingat Pagi',
-            body:
-                'Tugas "$title" dikumpulkan besok! Tetap semangat menyelesaikannya.',
-            scheduledDate: tz.TZDateTime.from(morningTime, tz.local),
+            body: _buildNotificationBody(
+              fallback:
+                  'Tugas "$title" dikumpulkan besok! Tetap semangat menyelesaikannya.',
+              title: title,
+              instruction: hasInstruction ? instruction : null,
+            ),
+            scheduledDate: morningTime,
             notificationDetails: platformDetails,
-            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
           );
         }
 
         if (eveningTime.isBefore(deadline) && eveningTime.isAfter(now)) {
-          await flutterLocalNotificationsPlugin.zonedSchedule(
-            id: id.hashCode + (dayOffset * 10) + 2,
+          await _scheduleAndroidNotification(
+            id: baseNotificationId + (dayOffset * 10) + 2,
             title: '🟡 TideNote Pengingat Malam',
-            body: 'Jangan lupa cicil tugas "$title" sebelum besok.',
-            scheduledDate: tz.TZDateTime.from(eveningTime, tz.local),
+            body: _buildNotificationBody(
+              fallback: 'Jangan lupa cicil tugas "$title" sebelum besok.',
+              title: title,
+              instruction: hasInstruction ? instruction : null,
+            ),
+            scheduledDate: eveningTime,
             notificationDetails: platformDetails,
-            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
           );
         }
 
@@ -378,6 +452,7 @@ class _HomeScreenState extends State<HomeScreen>
     }
     // 3. KATEGORI MERAH (< 24 jam) -> 3x Sehari + 3 Jam Sblm Deadline
     else if (remaining > Duration.zero) {
+      debugPrint('[TideNote] notification category=red remaining=$remaining');
       for (var dayOffset = 0; ; dayOffset++) {
         final dayBase = DateTime(
           now.year,
@@ -399,38 +474,47 @@ class _HomeScreenState extends State<HomeScreen>
         );
 
         if (morningTime.isBefore(deadline) && morningTime.isAfter(now)) {
-          await flutterLocalNotificationsPlugin.zonedSchedule(
-            id: id.hashCode + (dayOffset * 10) + 3,
+          await _scheduleAndroidNotification(
+            id: baseNotificationId + (dayOffset * 10) + 3,
             title: '🔴 TideNote: Pagi Ini',
-            body:
-                'Deadline tugas "$title" sudah sangat dekat. Mulai dikerjakan sekarang.',
-            scheduledDate: tz.TZDateTime.from(morningTime, tz.local),
+            body: _buildNotificationBody(
+              fallback:
+                  'Deadline tugas "$title" sudah sangat dekat. Mulai dikerjakan sekarang.',
+              title: title,
+              instruction: hasInstruction ? instruction : null,
+            ),
+            scheduledDate: morningTime,
             notificationDetails: platformDetails,
-            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
           );
         }
 
         if (noonTime.isBefore(deadline) && noonTime.isAfter(now)) {
-          await flutterLocalNotificationsPlugin.zonedSchedule(
-            id: id.hashCode + (dayOffset * 10) + 4,
+          await _scheduleAndroidNotification(
+            id: baseNotificationId + (dayOffset * 10) + 4,
             title: '🔴 TideNote: Siang Ini',
-            body:
-                'Sisa waktu untuk tugas "$title" tinggal sedikit. Tetap lanjutkan pengerjaan.',
-            scheduledDate: tz.TZDateTime.from(noonTime, tz.local),
+            body: _buildNotificationBody(
+              fallback:
+                  'Sisa waktu untuk tugas "$title" tinggal sedikit. Tetap lanjutkan pengerjaan.',
+              title: title,
+              instruction: hasInstruction ? instruction : null,
+            ),
+            scheduledDate: noonTime,
             notificationDetails: platformDetails,
-            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
           );
         }
 
         if (eveningTime.isBefore(deadline) && eveningTime.isAfter(now)) {
-          await flutterLocalNotificationsPlugin.zonedSchedule(
-            id: id.hashCode + (dayOffset * 10) + 5,
+          await _scheduleAndroidNotification(
+            id: baseNotificationId + (dayOffset * 10) + 5,
             title: '🔴 TideNote: Malam Ini',
-            body:
-                'Jangan tunda lagi, tugas "$title" harus segera diselesaikan.',
-            scheduledDate: tz.TZDateTime.from(eveningTime, tz.local),
+            body: _buildNotificationBody(
+              fallback:
+                  'Jangan tunda lagi, tugas "$title" harus segera diselesaikan.',
+              title: title,
+              instruction: hasInstruction ? instruction : null,
+            ),
+            scheduledDate: eveningTime,
             notificationDetails: platformDetails,
-            androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
           );
         }
 
@@ -443,16 +527,71 @@ class _HomeScreenState extends State<HomeScreen>
 
       final emergencyTime = deadline.subtract(const Duration(hours: 3));
       if (emergencyTime.isAfter(now)) {
-        await flutterLocalNotificationsPlugin.zonedSchedule(
-          id: id.hashCode + 6,
+        debugPrint(
+          '[TideNote] notification emergency scheduled at=$emergencyTime',
+        );
+        await _scheduleAndroidNotification(
+          id: baseNotificationId + 6,
           title: '🔴 PERINGATAN DARURAT!',
-          body: 'Waktu tersisa kurang dari 3 jam untuk tugas "$title"!',
-          scheduledDate: tz.TZDateTime.from(emergencyTime, tz.local),
+          body: _buildNotificationBody(
+            fallback: 'Waktu tersisa kurang dari 3 jam untuk tugas "$title"!',
+            title: title,
+            instruction: hasInstruction ? instruction : null,
+          ),
+          scheduledDate: emergencyTime,
           notificationDetails: platformDetails,
-          androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
         );
       }
+    } else {
+      debugPrint(
+        '[TideNote] notification skipped because remaining=$remaining',
+      );
     }
+  }
+
+  Future<void> _scheduleAndroidNotification({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime scheduledDate,
+    required NotificationDetails notificationDetails,
+  }) async {
+    try {
+      await flutterLocalNotificationsPlugin.zonedSchedule(
+        id: id,
+        title: title,
+        body: body,
+        scheduledDate: tz.TZDateTime.from(scheduledDate, tz.local),
+        notificationDetails: notificationDetails,
+        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      );
+      debugPrint('[TideNote] scheduled exact id=$id at=$scheduledDate');
+    } catch (error) {
+      debugPrint(
+        '[TideNote] exact schedule failed id=$id at=$scheduledDate error=$error; retrying inexact',
+      );
+      await flutterLocalNotificationsPlugin.zonedSchedule(
+        id: id,
+        title: title,
+        body: body,
+        scheduledDate: tz.TZDateTime.from(scheduledDate, tz.local),
+        notificationDetails: notificationDetails,
+        androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      );
+      debugPrint('[TideNote] scheduled inexact id=$id at=$scheduledDate');
+    }
+  }
+
+  String _buildNotificationBody({
+    required String fallback,
+    required String title,
+    String? instruction,
+  }) {
+    final cleanedInstruction = instruction?.trim();
+    if (cleanedInstruction == null || cleanedInstruction.isEmpty) {
+      return '$fallback\nDetail tugas: $title';
+    }
+    return '$fallback\nInstruksi: $cleanedInstruction';
   }
 
   Future<void> cancelTaskNotification(String id) async {
@@ -614,6 +753,7 @@ class _HomeScreenState extends State<HomeScreen>
         _tasks[taskIndex]['id'],
         _tasks[taskIndex]['title'],
         _tasks[taskIndex]['deadline'],
+        instruction: _tasks[taskIndex]['instruction']?.toString(),
       );
       _saveTasks();
     }
@@ -887,6 +1027,7 @@ class _HomeScreenState extends State<HomeScreen>
                     newId,
                     titleController.text,
                     selectedDeadline,
+                    instruction: instructionController.text,
                   );
 
                   _saveTasks();
@@ -1017,6 +1158,12 @@ class _HomeScreenState extends State<HomeScreen>
             onDelete: () => _deleteTask(t['id']),
             onToggleStatus: () => _toggleTaskStatus(t['id']),
             onToggleUrgency: () => _toggleTaskUrgency(t['id']),
+            onViewProofImage: t['proofImage'] != null
+                ? () => _showProofImagePreview(
+                    t['proofImage'].toString(),
+                    t['title'].toString(),
+                  )
+                : null,
           ),
         )
         .toList();
@@ -1419,6 +1566,126 @@ class _HomeScreenState extends State<HomeScreen>
       ],
     ),
   );
+
+  Future<void> _showProofImagePreview(String proofImage, String title) async {
+    if (!mounted) return;
+
+    final imageBytes = base64Decode(proofImage);
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return Dialog(
+          insetPadding: const EdgeInsets.all(16),
+          backgroundColor: Colors.transparent,
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 720, maxHeight: 820),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF8FAFC),
+              borderRadius: BorderRadius.circular(28),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.18),
+                  blurRadius: 28,
+                  offset: const Offset(0, 16),
+                ),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 18, 12, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            color: Color(0xFF0F172A),
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.pop(dialogContext),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(20),
+                      child: InteractiveViewer(
+                        minScale: 0.8,
+                        maxScale: 4.0,
+                        child: Container(
+                          color: Colors.black,
+                          width: double.infinity,
+                          child: Image.memory(
+                            imageBytes,
+                            fit: BoxFit.contain,
+                            errorBuilder: (context, error, stackTrace) {
+                              return const Center(
+                                child: Text(
+                                  'Gambar tidak dapat ditampilkan',
+                                  style: TextStyle(color: Colors.white),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF8DBEE1),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        elevation: 0,
+                      ),
+                      onPressed: () async {
+                        final savedLocation = await saveProofImage(
+                          imageBytes,
+                          fileName:
+                              'bukti-${title.replaceAll(RegExp(r'[^A-Za-z0-9]+'), '-')}-${DateTime.now().millisecondsSinceEpoch}.png',
+                        );
+                        if (!mounted) return;
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Bukti disimpan ke $savedLocation'),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.download_rounded),
+                      label: const Text('Unduh Gambar'),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
 
 class FolderAccordion extends StatelessWidget {
@@ -1553,6 +1820,7 @@ class TaskCard extends StatelessWidget {
   final String? instruction, proofImage;
   final DateTime deadline;
   final bool isUrgent;
+  final VoidCallback? onViewProofImage;
   final VoidCallback onDelete, onToggleStatus, onToggleUrgency;
   const TaskCard({
     super.key,
@@ -1563,6 +1831,7 @@ class TaskCard extends StatelessWidget {
     required this.deadline,
     required this.status,
     required this.isUrgent,
+    this.onViewProofImage,
     required this.onDelete,
     required this.onToggleStatus,
     required this.onToggleUrgency,
@@ -1572,6 +1841,7 @@ class TaskCard extends StatelessWidget {
     required VoidCallback onDelete,
     required VoidCallback onToggleStatus,
     required VoidCallback onToggleUrgency,
+    VoidCallback? onViewProofImage,
   }) {
     return TaskCard(
       id: data['id'],
@@ -1581,6 +1851,7 @@ class TaskCard extends StatelessWidget {
       deadline: data['deadline'],
       status: data['status'],
       isUrgent: data['isUrgent'] ?? false,
+      onViewProofImage: onViewProofImage,
       onDelete: onDelete,
       onToggleStatus: onToggleStatus,
       onToggleUrgency: onToggleUrgency,
@@ -1678,13 +1949,43 @@ class TaskCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 if (isDone && proofImage != null) ...[
-                  ClipRRect(
+                  InkWell(
+                    onTap: onViewProofImage,
                     borderRadius: BorderRadius.circular(12),
-                    child: Image.memory(
-                      base64Decode(proofImage!),
-                      width: double.infinity,
-                      height: 120,
-                      fit: BoxFit.cover,
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.memory(
+                            base64Decode(proofImage!),
+                            width: double.infinity,
+                            height: 120,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        Positioned(
+                          right: 8,
+                          bottom: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.55),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: const Text(
+                              'Lihat fullsize',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(height: 16),
